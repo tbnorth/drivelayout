@@ -1,4 +1,4 @@
-"""
+"""Drive layout analysis
 """
 
 # drivelayout.py $Id$
@@ -10,19 +10,34 @@ import os
 import subprocess
 import time
 import sys
-
+import optparse
 def dsz(x):
-    u = 0
-    while x >= 1024:
-        x /= 1024
-        u += 1
-    return "%d %s" % (int(x), ['b','k','Mb','Gb','Tb','Pb'][u])
 
+    divisor = 1024
+
+    u = 0
+    assert ' ' not in str(x)
+    x = int(x)
+    while x >= 4*divisor:
+        x /= divisor
+        u += 1
+    return "%d %s" % (int(x), ['b','kb','Mb','Gb','Tb','Pb'][u])
 def runCmd(s):
     proc = subprocess.Popen(s.split(), stderr=subprocess.PIPE)
     proc.wait()
 
+def makeParser():
+    parser = optparse.OptionParser()
+    parser.add_option("--ls",
+                  action="store_true", default=False,
+                  help="list one line of files from unmounted devices")
+    return parser
 def main():
+
+    parser = makeParser()
+    opt, arg = parser.parse_args()
+
+    # collect list of mount points for mounted volumes
     proc = subprocess.Popen('mount', stdout=subprocess.PIPE)
     proc.wait()
     mntLines = [i.strip() for i in proc.stdout.readlines()]
@@ -31,6 +46,7 @@ def main():
         line = line.split()
         mntpnt[line[0]] = line[2]
 
+    # get info about all partitions
     proc = subprocess.Popen('blkid', stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE)
     proc.wait()
@@ -45,26 +61,19 @@ def main():
         for item in info.split():
             ikey, val = item.split('=')
             parts[key][ikey] = val.strip('"')
-        proc = subprocess.Popen(('fdisk', '-s', key), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-        proc.wait()
-        txt = proc.stdout.read().strip()
-        if not txt.strip():
-            sz = 0
+
+        # get size info for partition
+        sz = sizeof(key)
+        if sz:
+            parts[key]['SIZE'] = dsz(sz)
         else:
-            sz = int(txt) / 1024
-        if sz > 1023:
-            sz = str(sz / 1024) + 'G'
-        else:
-            sz = str(sz) + 'M'
-        parts[key]['SIZE'] = sz
+            parts[key]['SIZE'] = 'N/A'
+
     for dev in sorted(devs.keys()):
-        proc = subprocess.Popen(('fdisk', '-l', dev), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-        proc.wait()
-        devLines = [i.strip() for i in proc.stdout.readlines()]
-        if devLines:
-            print dev, devLines[1].split()[2], devLines[1].split()[3] 
+        # get size info for whole device
+        sz = sizeof(dev)
+        if sz:
+            print dev, dsz(sz)
         else:
             print dev, 'NO INFO.'
         d = '\033[32m'
@@ -78,7 +87,9 @@ def main():
             print '   ',os.path.basename(part),
             print ' '.join([d+k+':'+l+str(devs[dev][part][k]) 
                             for k in sorted(devs[dev][part].keys())])
-            if devLines and part not in mntpnt and devs[dev][part].get('TYPE') != 'swap':
+            if (opt.ls and devLines
+                and part not in mntpnt
+                and devs[dev][part].get('TYPE') != 'swap'):
                 try:
                     runCmd('mkdir -p /mnt/drive-test-temp')
                     runCmd('umount /mnt/drive-test-temp')
@@ -90,7 +101,7 @@ def main():
                     pass
             if devLines and part in mntpnt:
                 stat = os.statvfs(mntpnt[part])
-                
+
                 print d+'     ON:'+l,mntpnt[part],
                 print d+' FREE:'+l+'%s %d%%' % (dsz(stat.f_bsize*stat.f_bavail),
                                           int(stat.f_bavail*100/stat.f_blocks)),
@@ -101,5 +112,16 @@ def main():
 
     runCmd('umount /mnt/drive-test-temp')
 
+def sizeof(thing):
+    proc = subprocess.Popen(('fdisk', '-s', thing), stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+    proc.wait()
+    txt = proc.stdout.read().strip()
+    if not txt.strip():
+        sz = None
+    else:
+        sz = int(txt)*1024
+
+    return sz
 if __name__ == '__main__':
     main()
