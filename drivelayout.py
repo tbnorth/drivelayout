@@ -11,6 +11,8 @@ import subprocess
 import time
 import sys
 import optparse
+
+TMPMP = "/mnt/drive-test-temp"  # temporary mount point for testing
 def dsz(x):
     """translate x bytes to '4513 Gb' type strings"""
     divisor = 1024
@@ -22,6 +24,17 @@ def dsz(x):
         x /= divisor
         u += 1
     return "%d %s" % (int(x), ['b','kb','Mb','Gb','Tb','Pb'][u])
+def is_mounted(mp):
+    """is_mounted - Return True if mp is mounted and not just a mount point
+
+    :Parameters:
+    - `mp`: path to mount point
+    """
+
+    if mp != TMPMP:
+        return True  # weak but sufficient
+
+    return os.stat(TMPMP).st_dev != os.stat(os.path.dirname(TMPMP)).st_dev
 def sizeof(thing):
     """determine the size of a device or partition according to `fdisk -s`
 
@@ -118,15 +131,15 @@ def main():
                 and part not in mntpnt
                 and devs[dev][part].get('TYPE') != 'swap'):
                 try:
-                    runCmd('mkdir -p /mnt/drive-test-temp')
-                    runCmd('umount /mnt/drive-test-temp')
+                    runCmd('mkdir -p '+TMPMP)
+                    runCmd('umount '+TMPMP)
                     time.sleep(1)
-                    runCmd('mount %s /mnt/drive-test-temp' % part)
+                    runCmd('mount %s %s' % (part, TMPMP))
                     time.sleep(1)
-                    mntpnt[part] = '/mnt/drive-test-temp'
+                    mntpnt[part] = TMPMP
                 except:
                     pass
-            if devLines and part in mntpnt:
+            if devLines and part in mntpnt and is_mounted(mntpnt[part]):
                 stat = os.statvfs(mntpnt[part])
 
                 print d+'         ON:'+l,mntpnt[part],
@@ -135,7 +148,6 @@ def main():
                 print d+' RESV:'+l+dsz(stat.f_bsize*(stat.f_bfree-stat.f_bavail))
                 files = [os.path.basename(i)[:10] 
                          for i in glob.glob(os.path.join(mntpnt[part],'*'))]
-                runCmd('umount /mnt/drive-test-temp')
                 if files:
                     files.sort()
                     print f+'        ',' '.join(files)[:70]+l
@@ -145,6 +157,8 @@ def main():
                         if 'DISTRIB_DESCRIPTION' in line:
                             print '        ', line.strip()
 
+
+    runCmd('umount '+TMPMP)
     try:
         print("\nLVM info (check VFree):")
         runCmd('vgs')  # to show unallocated LVM space 
