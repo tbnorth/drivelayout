@@ -12,7 +12,7 @@ import time
 import sys
 import optparse
 def dsz(x):
-
+    """translate x bytes to '4513 Gb' type strings"""
     divisor = 1024
 
     u = 0
@@ -22,11 +22,32 @@ def dsz(x):
         x /= divisor
         u += 1
     return "%d %s" % (int(x), ['b','kb','Mb','Gb','Tb','Pb'][u])
+def sizeof(thing):
+    """determine the size of a device or partition according to `fdisk -s`
+
+    FIXME - hardwired 1024 byte blocks
+    """
+
+    proc = subprocess.Popen(('fdisk', '-s', thing), stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+    proc.wait()
+    txt = proc.stdout.read().strip()
+    if not txt.strip():
+        sz = None
+    else:
+        sz = int(txt)*1024
+
+    return sz
 def runCmd(s):
+    """run command in string s using subprocess.Popen()
+    """
+
     proc = subprocess.Popen(s.split(), stderr=subprocess.PIPE)
     proc.wait()
 
 def makeParser():
+    """return the OptionParser for this app."""
+
     parser = optparse.OptionParser()
     parser.add_option("--ls",
                   action="store_true", default=False,
@@ -72,16 +93,22 @@ def main():
     for dev in sorted(devs.keys()):
         # get size info for whole device
         sz = sizeof(dev)
-        if sz:
-            print dev, dsz(sz)
+        parts = sorted(devs[dev].keys())
+        if len(parts) == 1:
+            # LVM lv names ending in digits, see dev = key.strip('0123456789') above
+            devname = parts[0]
         else:
-            print dev, 'NO INFO.'
+            devname = dev
+        if sz:
+            print devname, dsz(sz)
+        else:
+            print devname, 'NO INFO.'
         d = '\033[32m'
         l = '\033[37m'
         f = '\033[31m'
         if not os.isatty(sys.stdout.fileno()):
             d = l = f = ''
-        for part in sorted(devs[dev].keys()):
+        for part in parts:
             if 'SEC_TYPE' in devs[dev][part]:
                 del devs[dev][part]['SEC_TYPE']
             print '   ',os.path.basename(part),
@@ -109,19 +136,14 @@ def main():
                 files = [os.path.basename(i)[:10] for i in glob.glob(os.path.join(mntpnt[part],'*'))]
                 files.sort()
                 print f+'        ',' '.join(files)[:70]+l
+                release = os.path.join(mntpnt[part], 'etc/lsb-release')
+                if os.path.isfile(release):
+                    for line in open(release):
+                        if 'DISTRIB_DESCRIPTION' in line:
+                            print '        ', line.strip()
+
 
     runCmd('umount /mnt/drive-test-temp')
 
-def sizeof(thing):
-    proc = subprocess.Popen(('fdisk', '-s', thing), stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE)
-    proc.wait()
-    txt = proc.stdout.read().strip()
-    if not txt.strip():
-        sz = None
-    else:
-        sz = int(txt)*1024
-
-    return sz
 if __name__ == '__main__':
     main()
