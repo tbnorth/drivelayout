@@ -129,21 +129,26 @@ def main():
             if devLines and part in mntpnt:
                 stat = os.statvfs(mntpnt[part])
 
-                print d+'     ON:'+l,mntpnt[part],
+                print d+'         ON:'+l,mntpnt[part],
                 print d+' FREE:'+l+'%s %d%%' % (dsz(stat.f_bsize*stat.f_bavail),
                                           int(stat.f_bavail*100/stat.f_blocks)),
                 print d+' RESV:'+l+dsz(stat.f_bsize*(stat.f_bfree-stat.f_bavail))
-                files = [os.path.basename(i)[:10] for i in glob.glob(os.path.join(mntpnt[part],'*'))]
-                files.sort()
-                print f+'        ',' '.join(files)[:70]+l
+                files = [os.path.basename(i)[:10] 
+                         for i in glob.glob(os.path.join(mntpnt[part],'*'))]
+                runCmd('umount /mnt/drive-test-temp')
+                if files:
+                    files.sort()
+                    print f+'        ',' '.join(files)[:70]+l
                 release = os.path.join(mntpnt[part], 'etc/lsb-release')
                 if os.path.isfile(release):
                     for line in open(release):
                         if 'DISTRIB_DESCRIPTION' in line:
                             print '        ', line.strip()
 
-
-    runCmd('umount /mnt/drive-test-temp')
-
+    try:
+        print("\nLVM info (check VFree):")
+        runCmd('vgs')  # to show unallocated LVM space 
+    except OSError:
+        print("none found")  # not installed?
 if __name__ == '__main__':
     main()
