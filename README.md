@@ -20,4 +20,13 @@ Usage
       --mount-all  leave all unmounted drives mounted for inspection
       --color      use color output even when redirected
 
+Screenshots
+-----------
+
+Details
+
 ![Screenshot](screenshot.png)
+
+Summary
+
+![Screenshot](screenshot_summ.png)
