@@ -78,10 +78,13 @@ def desc_devs_detail(opt, devs, mntpnt):
             if part in mntpnt and is_mounted(mntpnt[part]): #X and devLines:
                 stat = os.statvfs(mntpnt[part])
 
+                devs[dev][part]['ON'] = mntpnt[part]
                 print d+'         ON:'+l,mntpnt[part],
-                print d+' FREE:'+l+'%s %d%%' % (dsz(stat.f_bsize*stat.f_bavail),
-                                          int(stat.f_bavail*100/stat.f_blocks)),
-                print d+' RESV:'+l+dsz(stat.f_bsize*(stat.f_bfree-stat.f_bavail))
+                devs[dev][part]['FREE'] = '%s %d%%' % (dsz(stat.f_bsize*stat.f_bavail),
+                                          int(stat.f_bavail*100/stat.f_blocks))
+                print d+' FREE:'+l+devs[dev][part]['FREE'],
+                devs[dev][part]['RESV'] = dsz(stat.f_bsize*(stat.f_bfree-stat.f_bavail))
+                print d+' RESV:'+l+devs[dev][part]['RESV']
                 files = [os.path.basename(i)[:10]
                          for i in glob.glob(os.path.join(mntpnt[part],'*'))]
                 if files:
@@ -92,7 +95,7 @@ def desc_devs_detail(opt, devs, mntpnt):
                     for line in open(release):
                         if 'DISTRIB_DESCRIPTION' in line:
                             print '        ', line.strip()
-
+                            devs[dev][part]['DISTRIB_DESCRIPTION'] = line.strip().split('=', 1)[-1]
 
     runCmd('umount '+TMPMP)
 
