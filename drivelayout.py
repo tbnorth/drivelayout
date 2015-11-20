@@ -101,6 +101,7 @@ def desc_devs_summary(opt, devs, mntpnt):
     # LVM summary
     try:
         print("\nLVM info (check VFree):")
+        sys.stdout.flush()
         runCmd('vgs')  # to show unallocated LVM space
     except OSError:
         print("none found")  # not installed?
