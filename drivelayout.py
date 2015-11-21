@@ -10,8 +10,12 @@ import os
 import subprocess
 import time
 import shlex
+import socket
 import sys
+import time
 import optparse
+
+from xml.etree import ElementTree as ET
 
 TMPMP = "/mnt/drive-test-temp"  # temporary mount point for testing
 
@@ -39,6 +43,7 @@ def desc_devs_detail(opt, devs, mntpnt):
         # get size info for whole device
         sz = sizeof(dev)
         parts = sorted(devs[dev].keys())
+        devs[dev]['_:SIZE'] = dsz(sz) if sz else '???'
         if len(parts) == 1:
             # LVM lv names ending in digits, see dev = key.strip('0123456789') above
             devname = parts[0]
@@ -89,6 +94,7 @@ def desc_devs_detail(opt, devs, mntpnt):
                          for i in glob.glob(os.path.join(mntpnt[part],'*'))]
                 if files:
                     files.sort()
+                    devs[dev][part]['FILES'] = files
                     print f+'        ',' '.join(files)[:70]+l
                 release = os.path.join(mntpnt[part], 'etc/lsb-release')
                 if os.path.isfile(release):
@@ -113,7 +119,7 @@ def desc_devs_summary(opt, devs, mntpnt):
 
     # device summary
     for dev in sorted(devs.keys()):
-        parts = sorted(devs[dev].keys())
+        parts = sorted(i for i in devs[dev] if not i.startswith('_:'))
         sz = sizeof(dev)
         if not sz:
             sz = devs[dev][parts[0]].get('SIZE')
@@ -165,6 +171,8 @@ def main():
     devs, mntpnt = stat_devs()
     desc_devs(opt, devs, mntpnt)
 
+    if opt.opml:
+        save_opml(opt, devs, mntpnt)
 def makeParser():
     """return the OptionParser for this app."""
 
@@ -184,6 +192,8 @@ def makeParser():
     parser.add_option("--color",
                   action="store_true", default=False,
                   help="use color output even when redirected")
+    parser.add_option("--opml", type=str,
+                  help="save output in OPML format")
     return parser
 def runCmd(s):
     """run command in string s using subprocess.Popen()
@@ -192,6 +202,63 @@ def runCmd(s):
     proc = subprocess.Popen(s.split(), stderr=subprocess.PIPE)
     proc.wait()
 
+def save_opml(opt, devs, mntpnt):
+    """save_opml - save drives in OPML format for outliner import
+
+    :param optparse Namespace opt: options
+    :param dict devs: see desc_devs(()
+    :param dict mntpnt: parition to mount point mapping
+
+    """
+
+    LEO = "leo:com:leo-opml-version-1"
+    BODY = "{%s}body" % LEO
+
+    def kv(d, k):
+        if k in d:
+            return "%s: %s " % (k, d[k])
+        else:
+            return ''
+
+    ET.register_namespace('leo', LEO)
+    opml = ET.Element("opml", version="2.0")
+    head = ET.SubElement(opml, "head")
+    title = "Drives on %s %s" % (socket.gethostname(), time.asctime())
+    ET.SubElement(head, "title").text = title
+    body = ET.SubElement(opml, "body")
+    top = ET.SubElement(body, "outline")
+    top.set("text", title)
+    for dev_name in sorted(devs):
+        dev = ET.SubElement(top, "outline")
+        dev.set("text", "%s %s" % (dev_name, devs[dev_name]['_:SIZE']))
+        for part_name in sorted(i for i in devs[dev_name] if not i.startswith('_:')):
+            part = ET.SubElement(dev, "outline")
+            part_data = devs[dev_name][part_name]
+            part.set("text", ' '.join(i for i in [part_name,
+                part_data.get('LABEL'), part_data.get('ON'), part_data.get('SIZE'), 
+                part_data.get('TYPE')] if i and i != TMPMP))
+            text = "%s\n%s\n%s\n\n%s\n" % (
+                kv(part_data, 'LABEL')+kv(part_data, 'SIZE')+kv(part_data, 'TYPE')+kv(part_data, 'UUID'),
+                kv(part_data, 'ON')+kv(part_data, 'FREE')+kv(part_data, 'RESV'),
+                kv(part_data, 'DISTRIB_DESCRIPTION'),
+                ' '.join(part_data.get('FILES', [])),
+            )
+            ET.SubElement(part, BODY).text = text.replace('\n\n\n', '\n\n')
+            for attr_name in sorted(part_data):
+                attr = ET.SubElement(part, 'outline')
+                text="%s: %s" % (attr_name, part_data[attr_name])
+                if attr_name == 'FILES':
+                    text="%s: %s" % (attr_name, ' '.join(part_data[attr_name][:10]))
+                attr.set('text', text)
+
+    ET.ElementTree(opml).write(opt.opml)
+
+"""
+    sde1 SIZE:44 Gb TYPE:ext4 UUID:0737f555-dccf-4196-8dc3-6c15c041a303
+         ON: /  FREE:8 Gb 20%  RESV:2304 Mb
+         LIQUID_ASS bin boot cdrom dev etc home initrd.img initrd.img lib lib32
+         DISTRIB_DESCRIPTION="Ubuntu 14.04.3 LTS"
+"""
 def sizeof(thing):
     """determine the size of a device or partition according to `fdisk -s`
 
