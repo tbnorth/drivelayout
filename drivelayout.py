@@ -107,15 +107,19 @@ def desc_devs_detail(opt, devs, mntpnt):
 
 def desc_devs_summary(opt, devs, mntpnt):
 
+    summary = []  # pass on to save_opml
+
     # LVM summary
     try:
-        print("\nLVM info (check VFree):")
+        head = "LVM info (check VFree):"
+        print("\n"+head)
         sys.stdout.flush()
-        runCmd('vgs')  # to show unallocated LVM space
+        out, err = runCmd('vgs', return_data=True)  # to show unallocated LVM space
+        print(out)
+        summary = [head, out]
     except OSError:
         print("none found")  # not installed?
-
-    print('')
+        summary = [head, "none found"]
 
     # device summary
     for dev in sorted(devs.keys()):
@@ -133,9 +137,15 @@ def desc_devs_summary(opt, devs, mntpnt):
                 labels[-1] += ":"+label
         labels = ', '.join(labels)
         if sz:
-            print dev.replace('/dev/', ''), sz, labels
+            text = "%s %s %s" % (dev.replace('/dev/', ''), sz, labels)
         else:
-            print dev.replace('/dev/', ''), '(size?)', labels
+            text = "%s %s %s" % (dev.replace('/dev/', ''), '(size?)', labels)
+
+        print(text)
+        summary.append(text)
+
+    devs["_:SUMMARY"] = '\n'.join(summary)
+
 def dsz(x):
     """translate x bytes to '4513 Gb' type strings"""
     divisor = 1024
@@ -195,12 +205,16 @@ def makeParser():
     parser.add_option("--opml", type=str,
                   help="save output in OPML format")
     return parser
-def runCmd(s):
+def runCmd(s, return_data=False):
     """run command in string s using subprocess.Popen()
     """
 
-    proc = subprocess.Popen(s.split(), stderr=subprocess.PIPE)
-    proc.wait()
+    if return_data:
+        proc = subprocess.Popen(s.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return proc.communicate()
+    else:
+        proc = subprocess.Popen(s.split(), stderr=subprocess.PIPE)
+        proc.wait()
 
 def save_opml(opt, devs, mntpnt):
     """save_opml - save drives in OPML format for outliner import
@@ -228,14 +242,15 @@ def save_opml(opt, devs, mntpnt):
     body = ET.SubElement(opml, "body")
     top = ET.SubElement(body, "outline")
     top.set("text", title)
-    for dev_name in sorted(devs):
+    ET.SubElement(top, BODY).text = devs['_:SUMMARY']
+    for dev_name in sorted([i for i in devs if not i.startswith("_:")]):
         dev = ET.SubElement(top, "outline")
         dev.set("text", "%s %s" % (dev_name, devs[dev_name]['_:SIZE']))
         for part_name in sorted(i for i in devs[dev_name] if not i.startswith('_:')):
             part = ET.SubElement(dev, "outline")
             part_data = devs[dev_name][part_name]
             part.set("text", ' '.join(i for i in [part_name,
-                part_data.get('LABEL'), part_data.get('ON'), part_data.get('SIZE'), 
+                part_data.get('LABEL'), part_data.get('ON'), part_data.get('SIZE'),
                 part_data.get('TYPE')] if i and i != TMPMP))
             text = "%s\n%s\n%s\n\n%s\n" % (
                 kv(part_data, 'LABEL')+kv(part_data, 'SIZE')+kv(part_data, 'TYPE')+kv(part_data, 'UUID'),
