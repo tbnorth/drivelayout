@@ -20,6 +20,7 @@ from xml.etree import ElementTree as ET
 TMPMP = "/mnt/drive-test-temp"  # temporary mount point for testing
 
 TMPMP_N = [0]
+
 def desc_devs(opt, devs, mntpnt):
     """
     desc_devs - dump description of devices
@@ -46,7 +47,7 @@ def desc_devs_detail(opt, devs, mntpnt):
     bl = '\033[40m'
     # bh = '\033[33m'
     # bl = l
-    
+
     # bh = '\033[48;2;40;40;40m'
     if not opt.color and not os.isatty(sys.stdout.fileno()):
         d = l = f = bh = bl = ''
@@ -72,12 +73,15 @@ def desc_devs_detail(opt, devs, mntpnt):
                             for k in sorted(devs[dev][part].keys())])
             if (opt.ls #X and devLines
                 and part not in mntpnt
-                and devs[dev][part].get('TYPE') != 'swap'):
+                and devs[dev][part].get('TYPE') not in ('swap', 'LVM2_member', None)):
                 try:
                     MP = TMPMP
                     if opt.mount_all:
-                        MP = TMPMP+str(TMPMP_N[0])
-                        TMPMP_N[0] += 1
+                        if devs[dev][part].get('LABEL'):
+                            MP = "/mnt/%s" % devs[dev][part]['LABEL']
+                        else:
+                            MP = TMPMP+str(TMPMP_N[0])
+                            TMPMP_N[0] += 1
                     runCmd('mkdir -p '+MP)
                     runCmd('umount '+MP)
                     time.sleep(1)
@@ -141,7 +145,7 @@ def desc_devs_summary(opt, devs, mntpnt):
             label = devs[dev][part].get('LABEL')
             if label:
                 labels[-1] += ":"+label
-        labels = ', '.join(labels)
+        labels = ', '.join([i or '???' for i in labels])
         if sz:
             text = "%s %s %s" % (dev.replace('/dev/', ''), sz, labels)
         else:
@@ -163,6 +167,7 @@ def dsz(x):
         x /= divisor
         u += 1
     return "%d %s" % (int(x), ['b','kb','Mb','Gb','Tb','Pb'][u])
+
 def is_mounted(mp):
     """is_mounted - Return True if mp is mounted and not just a mount point
 
@@ -175,6 +180,7 @@ def is_mounted(mp):
 
     # FIXME broken with --mount-all, or always broken?
     return os.stat(TMPMP).st_dev != os.stat(os.path.dirname(TMPMP)).st_dev
+
 def main():
 
     parser = makeParser()
@@ -189,6 +195,7 @@ def main():
 
     if opt.opml:
         save_opml(opt, devs, mntpnt)
+
 def makeParser():
     """return the OptionParser for this app."""
 
@@ -211,6 +218,7 @@ def makeParser():
     parser.add_option("--opml", type=str,
                   help="save output in OPML format")
     return parser
+
 def runCmd(s, return_data=False):
     """run command in string s using subprocess.Popen()
     """
@@ -280,6 +288,7 @@ def save_opml(opt, devs, mntpnt):
          LIQUID_ASS bin boot cdrom dev etc home initrd.img initrd.img lib lib32
          DISTRIB_DESCRIPTION="Ubuntu 14.04.3 LTS"
 """
+
 def sizeof(thing):
     """determine the size of a device or partition according to `fdisk -s`
 
@@ -296,6 +305,7 @@ def sizeof(thing):
         sz = int(txt)*1024
 
     return sz
+
 def stat_devs():
     """returns devs, mntpnt - the parameters
     for desc_devs(), see desc_devs() for docs."""
@@ -306,7 +316,8 @@ def stat_devs():
     mntLines = [i.strip() for i in proc.stdout.readlines()]
     mntpnt = {}
     for line in mntLines:
-        line = line.split()
+        line, _ = line.rsplit(' type ', 1)
+        line = line.split(None, 2)
         mntpnt[line[0]] = line[2]
 
     # get info about all partitions
@@ -334,6 +345,6 @@ def stat_devs():
 
     return devs, mntpnt
 
-
 if __name__ == '__main__':
     main()
+
