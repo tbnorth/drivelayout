@@ -5,6 +5,8 @@
 # Author: Terry Brown
 # Created: Sun May 25 2008
 
+from __future__ import print_function
+
 import glob
 import os
 import subprocess
@@ -52,7 +54,7 @@ def desc_devs_detail(opt, devs, mntpnt):
     if not opt.color and not os.isatty(sys.stdout.fileno()):
         d = l = f = bh = bl = ''
     else:
-        print l
+        print(l)
 
     for dev in sorted(devs.keys()):
         # get size info for whole device
@@ -64,13 +66,13 @@ def desc_devs_detail(opt, devs, mntpnt):
             devname = parts[0]
         else:
             devname = dev
-        print "%s%s %s%s" % (bh, devname, dsz(sz) if sz else 'NO INFO.', bl)
+        print("%s%s %s%s" % (bh, devname, dsz(sz) if sz else 'NO INFO.', bl))
         for part in parts:
             if 'SEC_TYPE' in devs[dev][part]:
                 del devs[dev][part]['SEC_TYPE']
-            print part, # '   ',os.path.basename(part),
-            print ' '.join([d+k+':'+l+str(devs[dev][part][k])
-                            for k in sorted(devs[dev][part].keys())])
+            print(part, end= ' ') # '   ',os.path.basename(part),
+            print(' '.join([d+k+':'+l+str(devs[dev][part][k])
+                            for k in sorted(devs[dev][part].keys())]))
             if (opt.ls #X and devLines
                 and part not in mntpnt
                 and devs[dev][part].get('TYPE') not in ('swap', 'LVM2_member', None)):
@@ -94,23 +96,23 @@ def desc_devs_detail(opt, devs, mntpnt):
                 stat = os.statvfs(mntpnt[part])
 
                 devs[dev][part]['ON'] = mntpnt[part]
-                print d+'          ON:'+l,mntpnt[part],
+                print(d+'          ON:'+l,mntpnt[part], end= ' ')
                 devs[dev][part]['FREE'] = '%s %d%%' % (dsz(stat.f_bsize*stat.f_bavail),
                                           int(stat.f_bavail*100/stat.f_blocks))
-                print d+' FREE:'+l+devs[dev][part]['FREE'],
+                print(d+' FREE:'+l+devs[dev][part]['FREE'], end= ' ')
                 devs[dev][part]['RESV'] = dsz(stat.f_bsize*(stat.f_bfree-stat.f_bavail))
-                print d+' RESV:'+l+devs[dev][part]['RESV']
+                print(d+' RESV:'+l+devs[dev][part]['RESV'])
                 files = [os.path.basename(i)[:10]
                          for i in glob.glob(os.path.join(mntpnt[part],'*'))]
                 if files:
                     files.sort()
                     devs[dev][part]['FILES'] = files
-                    print f+'         ',' '.join(files)[:70]+l
+                    print(f+'         ',' '.join(files)[:70]+l)
                 release = os.path.join(mntpnt[part], 'etc/lsb-release')
                 if os.path.isfile(release):
                     for line in open(release):
                         if 'DISTRIB_DESCRIPTION' in line:
-                            print '         ', line.strip()
+                            print('         ', line.strip())
                             devs[dev][part]['DISTRIB_DESCRIPTION'] = line.strip().split('=', 1)[-1]
 
     runCmd('umount '+TMPMP)
@@ -318,7 +320,8 @@ def stat_devs():
     for line in mntLines:
         line, _ = line.rsplit(' type ', 1)
         line = line.split(None, 2)
-        mntpnt[line[0]] = line[2]
+        if line[0] not in mntpnt:
+            mntpnt[line[0]] = line[2]
 
     # get info about all partitions
     proc = subprocess.Popen('blkid', stdout=subprocess.PIPE,

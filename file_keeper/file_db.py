@@ -5,11 +5,13 @@ Terry Brown, terrynbrown@gmail.com, Sun Apr 22 16:36:40 2018
 """
 
 import argparse
+import json
 import os
 import logging
 from collections import namedtuple
 from subprocess import Popen, PIPE
 
+from drivelayout import dsz, stat_devs
 Dev = namedtuple("Dev", "dev_num dev_path mount uuid")
 
 def get_devs():
@@ -73,7 +75,7 @@ def make_parser():
      return parser
 
 def main():
-    print(get_devs())
+    print(json.dumps(stat_devs()[1]))
 
 if __name__ == '__main__':
     main()
