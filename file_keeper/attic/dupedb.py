@@ -5,7 +5,6 @@ Terry Brown, Terry_N_Brown@yahoo.com, Wed Aug 20 12:32:14 2014
 """
 
 import os
-import sys
 import argparse
 import sqlite3
 
@@ -45,12 +44,12 @@ def log_file(con, cur, file_path, stat, device):
     - `stat`: os.stat()
     - `device`: device table ROWID
     """
-    
+
     query = """insert into file (device, path, bytes)
         values (:device, :path, :bytes)"""
     parameters = {'device': device, 'path': file_path,
         'bytes': stat.st_size}
-    cur.execute(query, parameters)    
+    cur.execute(query, parameters)
     con.commit()
 
 
@@ -58,7 +57,7 @@ def main():
     opt = make_parser().parse_args()
 
     devs, mntpnts = stat_devs()
-    
+
     con = sqlite3.connect("dupedb.sqlite3")
     cur = con.cursor()
 
@@ -73,8 +72,8 @@ def main():
     else:
         print("Can't find mountpoint for path")
         exit(1)
-        
-    print "Mounted on %s %s" % (partition, mntpnt)
+
+    print("Mounted on %s %s" % (partition, mntpnt))
 
     for dev, partitions in devs.items():
         if partition in partitions:
@@ -85,7 +84,7 @@ def main():
         print("Can't find UUID for partition")
         exit(1)
     print("label:%s uuid:%s" % (label, uuid))
-    
+
     query = "select device from device where uuid=:uuid"
     parameters = {'uuid': uuid, 'mntpnt': mntpnt, 'label': label}
     cur.execute(query, parameters)
@@ -99,13 +98,13 @@ def main():
         cur.execute(query, parameters)
         res = cur.fetchall()
     device = res[0][0]
-    
+
     scanned = 0
     large = 0
     bytes = 0
     for path, dirs, files in os.walk(scan_path):
         if scanned % 1000:
-            print("files:%s large:%s scanned:%s" % 
+            print("files:%s large:%s scanned:%s" %
                 (scanned, large, dsz(bytes)))
         for filename in files:
             file_path = os.path.join(path, filename)
@@ -115,14 +114,14 @@ def main():
             if stat.st_size >= opt.min_size:
                 large += 1
                 log_file(con, cur, file_path, stat, device)
-        
+
 def make_parser():
-     
+
      parser = argparse.ArgumentParser(
          description="""general description""",
          formatter_class=argparse.ArgumentDefaultsHelpFormatter
      )
-     
+
      parser.add_argument("--min-size", type=int, default=10*1024*1024,
          help="minimum size (bytes) to scan"
      )
@@ -133,3 +132,4 @@ def make_parser():
      return parser
 if __name__ == '__main__':
     main()
+
