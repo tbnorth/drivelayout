@@ -17,13 +17,20 @@ create table hash (    -- hashes
     hash_text text,    -- text of hash
     -- length integer     -- amount of data read for hash
 );
-create index idx_hash_text_len on hash (hash_text); -- , length);
+create index idx_hash_text on hash (hash_text); -- , length);
+create table uuid (    -- uuides
+    uuid PRIMARY KEY,
+    uuid_text text     -- text of uuid
+);
+create index idx_uuid_text on uuid (uuid_text);
 create table file (    -- files
     file PRIMARY KEY,
+    uuid integer,      -- uuid of drive (partition, but not partuuid)
     path text,         -- path to file
     inode integer,     -- inode of file
     dev integer,       -- device of file
-    size integer       -- size of file
+    size integer,       -- size of file
+    FOREIGN KEY(uuid) REFERENCES uuid(uuid)
 );
 create index idx_hash_path on file(path);
 create index idx_hash_size on file(size);

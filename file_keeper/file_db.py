@@ -12,32 +12,6 @@ from collections import namedtuple
 from subprocess import Popen, PIPE
 
 from drivelayout import dsz, stat_devs
-Dev = namedtuple("Dev", "dev_num dev_path mount uuid")
-
-def get_devs():
-    """get Devs"""
-    proc = Popen(['df'], stdout=PIPE)
-    devs, _ = proc.communicate()
-    devs = [i.split() for i in devs.split('\n') if i.startswith('/')]
-    devs = [i for i in devs if i[-1].startswith('/')]
-    dev2uuid = {}
-    for uuid in os.listdir('/dev/disk/by-uuid/'):
-        dev2uuid['/dev/'+os.readlink('/dev/disk/by-uuid/'+uuid).split('/')[-1]] = uuid
-    Devs = []
-    for dev in devs:
-        try:
-            stat = os.stat(dev[-1])
-        except OSError:
-            stat = None
-            logging.warning("Couldn't stat '%s'" % dev[-1])
-        if stat is not None:
-            Devs.append(Dev(
-                dev_num = stat.st_dev,
-                dev_path = dev[0],
-                mount = [-1],
-                uuid = dev2uuid[dev[0]]
-            ))
-    return Devs
 
 def get_options(args=None):
     """
@@ -66,16 +40,30 @@ def make_parser():
      )
 
      parser.add_argument("--foo", action='store_true',
-         help="<|help|>"
+         help=""
      )
-     parser.add_argument('<|positional(s)|>', type=str, nargs='+',
-         help="<|help|>"
+     parser.add_argument('', type=str, nargs='+',
+         help=""
      )
 
      return parser
 
+def stat_devs_list():
+    """Make sorted list of mounted partitions from stat_devs() output"""
+    devs, mntpnts = stat_devs()
+    ans = []
+    for dev in sorted(devs):
+        for part in sorted(devs[dev]):
+            d = devs[dev][part]
+            d['DEV'] = dev
+            d['PART'] = part
+            if part in mntpnts:
+                d['MNTPNT'] = mntpnts[part]
+                ans.append(d)
+    return ans
+
 def main():
-    print(json.dumps(stat_devs()[1]))
+    print(json.dumps(stat_devs_list(), sort_keys=True, indent=4))
 
 if __name__ == '__main__':
     main()
