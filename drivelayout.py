@@ -315,7 +315,7 @@ def stat_devs():
     # collect list of mount points for mounted volumes
     proc = subprocess.Popen('mount', stdout=subprocess.PIPE)
     proc.wait()
-    mntLines = [i.strip() for i in proc.stdout.readlines()]
+    mntLines = [i.decode('utf-8').strip() for i in proc.stdout.readlines()]
     mntpnt = {}
     for line in mntLines:
         line, _ = line.rsplit(' type ', 1)
@@ -327,7 +327,7 @@ def stat_devs():
     proc = subprocess.Popen('blkid', stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE)
     proc.wait()
-    devLines = [i.strip() for i in proc.stdout.readlines()]
+    devLines = [i.decode('utf-8').strip() for i in proc.stdout.readlines()]
     devs = {}
     for line in devLines:
         key, info = line.split(': ')
