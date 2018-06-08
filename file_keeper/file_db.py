@@ -99,6 +99,12 @@ def proc_file(opt, dev, filepath):
     if not os.path.isfile(filepath):
         return
     stat = os.stat(filepath)
+    get_or_make(opt, 'file', {
+        'uuid': opt.uuid,
+        'path': os.path.relpath(filepath, start=opt.mntpnt),
+        'inode': stat.st_ino,
+        'size': stat.st_size,
+    })
 
 def proc_dev(opt, dev):
     print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
@@ -106,6 +112,7 @@ def proc_dev(opt, dev):
     assert os.path.join(dev.mntpnt, base) == opt.path
     print(base)
     opt.uuid = get_or_make(opt, 'uuid', {'uuid_text': dev.uuid})
+    opt.mntpnt = dev.mntpnt
     c = 0
     for path, dirs, files in os.walk(opt.path):
         for filename in files:
@@ -124,6 +131,9 @@ def main():
             break
     else:
         raise Exception("No device for path")
+
+    opt.con.commit()
+
 
 
 if __name__ == '__main__':

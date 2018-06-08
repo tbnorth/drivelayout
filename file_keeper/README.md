@@ -28,7 +28,8 @@ create table file (    -- files
     uuid integer,      -- uuid of drive (partition, but not partuuid)
     path text,         -- path to file
     inode integer,     -- inode of file
-    size integer,      -- size of file
+    size integer,      -- size of file,
+    mtime integer,  -- modification time of file
     FOREIGN KEY(uuid) REFERENCES uuid(uuid)
 );
 create index idx_file_path on file(path);
@@ -38,6 +39,8 @@ create table file_hash (    -- hashes for a file, M2M
     file integer,
     hash integer,
     date date,      -- date on which the file had that hash
+    size integer,  -- size of file when hashed
+    mtime integer,  -- modification time of file when hashed
     FOREIGN KEY(file) REFERENCES file(file),
     FOREIGN KEY(hash) REFERENCES hash(hash)
 );
