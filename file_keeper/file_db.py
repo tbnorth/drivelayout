@@ -7,6 +7,7 @@ Terry Brown, terrynbrown@gmail.com, Sun Apr 22 16:36:40 2018
 import argparse
 import os
 import sqlite3
+import time
 
 from addict import Dict
 from drivelayout import stat_devs # dsz
@@ -27,10 +28,12 @@ def get_options(args=None):
     opt = make_parser().parse_args(args)
 
     # modifications / validations go here
-    if opt.path != can_path(opt.path):
-        print("%s -> %s" % (opt.path, can_path(opt.path)))
-        opt.path = can_path(opt.path)
+    canonical = can_path(opt.path)
+    if opt.path != canonical:
+        print("%s -> %s" % (opt.path, canonical))
+        opt.path = canonical
     opt.stat = os.stat(opt.path)
+    opt.run_time = int(time.time())
 
     return opt
 
@@ -75,37 +78,82 @@ def stat_devs_list():
                 ans.append(d)
     return ans
 
-def get(opt, table, keyvals):
+def get_pk(opt, table, ident):
     q = "select {table} from {table} where {vals}".format(
-        table=table, vals=' and '.join('%s=?' % k for k in keyvals))
-    opt.cur.execute(q, list(keyvals.values()))
+        table=table, vals=' and '.join('%s=?' % k for k in ident))
+    opt.cur.execute(q, list(ident.values()))
     res = opt.cur.fetchall()
+    if len(res) > 1:
+        raise Exception("More than on result for %s %s" % (table, ident))
     if res:
         return res[0][0]
     else:
         return None
 
-def get_or_make(opt, table, keyvals):
-    res = get(opt, table, keyvals)
+def get_rec(opt, table, ident, _rec_type_cache={}):
+    q = "select * from {table} where {vals}".format(
+        table=table, vals=' and '.join('%s=?' % k for k in ident))
+    opt.cur.execute(q, list(ident.values()))
+    res = opt.cur.fetchall()
+    if len(res) > 1:
+        raise Exception("More than on result for %s %s" % (table, ident))
     if res:
-        return res
+        return Dict(zip([i[0] for i in opt.cur.description], res[0]))
     else:
+        return None
+
+def get_or_make_pk(opt, table, ident, defaults=None):
+    res = get_pk(opt, table, ident)
+    if res:
+        return res, False
+    else:
+        defaults = defaults.copy() if defaults else dict()
+        defaults.update(ident)
         opt.cur.execute('insert into {table} ({fields}) values ({values})'.format(
-            table=table, fields=','.join(keyvals), values=','.join('?'*len(keyvals))),
-            list(keyvals.values()))
-        return get(opt, table, keyvals)
+            table=table, fields=','.join(defaults), values=','.join('?'*len(defaults))),
+            list(defaults.values()))
+        return get_pk(opt, table, defaults), True
+
+def get_or_make_rec(opt, table, ident, defaults=None):
+    res = get_rec(opt, table, ident)
+    if res:
+        return res, False
+    else:
+        defaults = defaults.copy() if defaults else dict()
+        defaults.update(ident)
+        opt.cur.execute('insert into {table} ({fields}) values ({values})'.format(
+            table=table, fields=','.join(defaults), values=','.join('?'*len(defaults))),
+            list(defaults.values()))
+        return get_rec(opt, table, ident), True
 
 def proc_file(opt, dev, filepath):
     if not os.path.isfile(filepath):
         return
     stat = os.stat(filepath)
+    file_pk, new = get_or_make_pk(opt, 'file',
+        ident=dict(
+            uuid=opt.uuid,
+            path=os.path.relpath(filepath, start=opt.base)
+        ), defaults=dict(
+            inode=stat.st_ino,
+            size=stat.st_size,
+            mtime=stat.st_mtime,
+        )
+    )
 
+    file_rec, new = get_or_make_rec(opt, 'file_hash',
+        ident=dict(file=file_pk),
+        defaults=dict(
+            size=stat.st_size,
+            date=opt.run_time
+        )
+    )
 def proc_dev(opt, dev):
     print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
-    base = os.path.relpath(opt.path, start=dev.mntpnt)
-    assert os.path.join(dev.mntpnt, base) == opt.path
-    print(base)
-    opt.uuid = get_or_make(opt, 'uuid', {'uuid_text': dev.uuid})
+    opt.base = os.path.relpath(opt.path, start=dev.mntpnt)
+    assert os.path.join(dev.mntpnt, opt.base) == opt.path
+    print(opt.base)
+    opt.uuid, new = get_or_make_pk(opt, 'uuid', {'uuid_text': dev.uuid})
     c = 0
     for path, dirs, files in os.walk(opt.path):
         for filename in files:
@@ -125,6 +173,7 @@ def main():
     else:
         raise Exception("No device for path")
 
+    opt.con.commit()
 
 if __name__ == '__main__':
     main()
