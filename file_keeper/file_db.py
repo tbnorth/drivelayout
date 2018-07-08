@@ -149,8 +149,8 @@ def proc_dev(opt, dev):
 def main():
 
     opt = get_options()
-    opt.con = sqlite3.connect(opt.db_file)
-    opt.cur = opt.con.cursor()
+    opt.con, opt.cur = get_or_make_db(opt)
+
     for dev in stat_devs_list():
         if opt.stat.st_dev == dev.stat.st_dev:
             proc_dev(opt, dev)
@@ -160,5 +160,14 @@ def main():
 
     opt.con.commit()
 
+
+def get_or_make_db(opt):
+    exists = os.path.exists(opt.db_file)
+    con = sqlite3.connect(opt.db_file)
+    if not exists:
+        for cmd in open('file_db.sql').read().split(';\n'):
+            con.execute(cmd)
+    cur = con.cursor()
+    return con, cur
 if __name__ == '__main__':
     main()
