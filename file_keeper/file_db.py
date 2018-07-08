@@ -7,11 +7,19 @@ Terry Brown, terrynbrown@gmail.com, Sun Apr 22 16:36:40 2018
 import argparse
 import os
 import sqlite3
+import sys
 import time
 
 from addict import Dict
 from drivelayout import stat_devs # dsz
 
+# field names to os.stat() attributes
+FLD2STAT = (('size', 'st_size'), ('mtime', 'st_mtime'), ('inode', 'st_ino'))
+
+if sys.version_info < (3, 6):
+    # need dict insertion order
+    print("file_db.py requires Python >= 3.6")
+    exit(10)
 def get_options(args=None):
     """
     get_options - use argparse to parse args, and return a
@@ -82,7 +90,7 @@ def get_pk(opt, table, ident, return_obj=False):
     q = "select {table} from {table} where {vals}".format(
         table=table, vals=' and '.join('%s=?' % k for k in ident))
     if return_obj:
-        q = q.replace('{table}', '*', 1)  # replace first {table}
+        q = q.replace(table, '*', 1)  # replace first <table>
     opt.cur.execute(q, list(ident.values()))
     res = opt.cur.fetchall()
     if len(res) > 1:
@@ -115,10 +123,10 @@ def proc_file(opt, dev, filepath):
     if not os.path.isfile(filepath):
         return
     stat = os.stat(filepath)
-    file_pk, new = get_or_make_pk(opt, 'file',
+    file_rec, new = get_or_make_rec(opt, 'file',
         ident=dict(
             uuid=opt.uuid,
-            path=os.path.relpath(filepath, start=opt.base)
+            path=os.path.relpath(filepath, start=opt.mntpnt)
         ), defaults=dict(
             inode=stat.st_ino,
             size=stat.st_size,
@@ -126,8 +134,19 @@ def proc_file(opt, dev, filepath):
         )
     )
 
+    if not new:
+        changes = [
+            k for k,v in FLD2STAT
+            if getattr(file_rec, k) != getattr(stat, v)
+        ]
+        if changes:
+            print("%s changed (%s)" % (filepath, ', '.join(changes)))
+            for k,v in FLD2STAT:
+                setattr(file_rec, k, getattr(stat, v))
+            save_rec(opt, file_rec)
+
     file_rec, new = get_or_make_rec(opt, 'file_hash',
-        ident=dict(file=file_pk),
+        ident=dict(file=file_rec.file),
         defaults=dict(
             size=stat.st_size,
             date=opt.run_time
@@ -136,6 +155,7 @@ def proc_file(opt, dev, filepath):
 def proc_dev(opt, dev):
     print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
     opt.base = os.path.relpath(opt.path, start=dev.mntpnt)
+    opt.mntpnt = dev.mntpnt
     assert os.path.join(dev.mntpnt, opt.base) == opt.path
     print(opt.base)
     opt.uuid, new = get_or_make_pk(opt, 'uuid', {'uuid_text': dev.uuid})
@@ -169,5 +189,20 @@ def get_or_make_db(opt):
             con.execute(cmd)
     cur = con.cursor()
     return con, cur
+def save_rec(opt, rec):
+    """save_rec - save a modified record
+
+    Args:
+        opt (argparse namespace): options
+        rec (Dict): record
+    """
+    table = list(rec.keys())[0]
+    pk = rec[table]
+    vals = [(k, v) for k, v in rec.items() if k != table]
+    q = 'update {table} set {values} where {table} = {pk}'.format(
+        table=table, pk=pk,
+        values=','.join('%s=?' % i[0] for i in vals)
+    )
+    opt.cur.execute(q, [i[1] for i in vals])
 if __name__ == '__main__':
     main()
