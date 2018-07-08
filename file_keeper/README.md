@@ -36,6 +36,7 @@ create index idx_file_path on file(path);
 create index idx_file_size on file(size);
 create index idx_file_dev on file(dev);
 create table file_hash (    -- hashes for a file, M2M
+    file_hash INTEGER PRIMARY KEY,
     file integer,
     hash integer,
     date date,      -- date on which the file had that size / hash

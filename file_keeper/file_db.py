@@ -78,32 +78,27 @@ def stat_devs_list():
                 ans.append(d)
     return ans
 
-def get_pk(opt, table, ident):
+def get_pk(opt, table, ident, return_obj=False):
     q = "select {table} from {table} where {vals}".format(
         table=table, vals=' and '.join('%s=?' % k for k in ident))
+    if return_obj:
+        q = q.replace('{table}', '*', 1)  # replace first {table}
     opt.cur.execute(q, list(ident.values()))
     res = opt.cur.fetchall()
     if len(res) > 1:
         raise Exception("More than on result for %s %s" % (table, ident))
     if res:
-        return res[0][0]
+        if return_obj:
+            return Dict(zip([i[0] for i in opt.cur.description], res[0]))
+        else:
+            return res[0][0]
     else:
         return None
 
-def get_rec(opt, table, ident, _rec_type_cache={}):
-    q = "select * from {table} where {vals}".format(
-        table=table, vals=' and '.join('%s=?' % k for k in ident))
-    opt.cur.execute(q, list(ident.values()))
-    res = opt.cur.fetchall()
-    if len(res) > 1:
-        raise Exception("More than on result for %s %s" % (table, ident))
-    if res:
-        return Dict(zip([i[0] for i in opt.cur.description], res[0]))
-    else:
-        return None
-
-def get_or_make_pk(opt, table, ident, defaults=None):
-    res = get_pk(opt, table, ident)
+def get_rec(opt, table, ident):
+    return get_pk(opt, table, ident, return_obj=True)
+def get_or_make_pk(opt, table, ident, defaults=None, return_obj=False):
+    res = get_pk(opt, table, ident, return_obj=return_obj)
     if res:
         return res, False
     else:
@@ -112,20 +107,10 @@ def get_or_make_pk(opt, table, ident, defaults=None):
         opt.cur.execute('insert into {table} ({fields}) values ({values})'.format(
             table=table, fields=','.join(defaults), values=','.join('?'*len(defaults))),
             list(defaults.values()))
-        return get_pk(opt, table, defaults), True
+        return get_pk(opt, table, defaults, return_obj=return_obj), True
 
 def get_or_make_rec(opt, table, ident, defaults=None):
-    res = get_rec(opt, table, ident)
-    if res:
-        return res, False
-    else:
-        defaults = defaults.copy() if defaults else dict()
-        defaults.update(ident)
-        opt.cur.execute('insert into {table} ({fields}) values ({values})'.format(
-            table=table, fields=','.join(defaults), values=','.join('?'*len(defaults))),
-            list(defaults.values()))
-        return get_rec(opt, table, ident), True
-
+    return get_or_make_pk(opt, table, ident, defaults=defaults, return_obj=True)
 def proc_file(opt, dev, filepath):
     if not os.path.isfile(filepath):
         return
