@@ -95,6 +95,12 @@ def do_query(opt, q, vals=None):
         Dict(zip([i[0] for i in opt.cur.description], i))
         for i in res
     ]
+
+def do_one(opt, q, vals=None):
+    ans = do_query(opt, q, vals=vals)
+    if len(ans) != 1:
+        raise Exception("'%s' did not produce a single record response" % q)
+    return ans[0]
 def stat_devs_list():
     """Make sorted list of mounted partitions from stat_devs() output"""
     devs, mntpnts = stat_devs()
@@ -209,6 +215,7 @@ def proc_file(opt, dev, filepath):
         )
     )
 def proc_dev(opt, dev):
+    dev.setdefault('label', '???')
     print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
     opt.base = os.path.relpath(opt.path, start=dev.mntpnt)
     opt.mntpnt = dev.mntpnt
@@ -293,35 +300,46 @@ def update_hashes(opt):
     Args:
         opt (argparse namespace): options
     """
-    def get_todo():
-        return do_query(opt, """
-select *
-  from (select * from file join file_hash using (file) join uuid using (uuid)) as x
+
+    count = do_one(opt, """
+select count(*) as count
+  from file join file_hash using (file) join uuid using (uuid)
+       left join hash using (hash)
+ where ?-date > ? or hash is null
+""", [time.time(), 24*60*60*opt.max_hash_age]).count
+
+    print("%s hashes to update" % count)
+
+    at_once = 3
+    # do this in blocks of `at_once` working backwards because
+    # relying on updating of hashes to remove them from the todo
+    # list (working blockwise *forward* through the list) won't
+    # work when files are deleted / on unmounted drives.
+    offset = count // at_once
+
+    while offset >= 0:
+        todo = do_query(opt, """
+select * from file join file_hash using (file) join uuid using (uuid)
        left join hash using (hash)
  where ?-date > ? or hash is null
  order by hash is null desc, date
- limit 1000
-""", [time.time(), 24*60*60*opt.max_hash_age])
-
-    todo = get_todo()
-
-    print(todo)
-    while todo:
-        rec = todo.pop(0)
-        print(rec.path)
-        try:
-            hash_text = hash_path(os.path.join(opt.mntpnts[rec.uuid_text], rec.path))
-            hash_pk, new = get_or_make_pk(opt, 'hash', {'hash_text': hash_text})
-            file_hash, new = get_or_make_rec(opt, 'file_hash', {'file_hash': rec.file_hash})
-            assert not new
-            file_hash.hash = hash_pk
-            file_hash.date = opt.run_time
-            save_rec(opt, file_hash)
-        except FileNotFoundError:
-            pass
-        if not todo:
-            opt.con.commit()
-            todo = get_todo()
-    opt.con.commit()
+ limit ? offset ?
+""", [time.time(), 24*60*60*opt.max_hash_age, at_once, offset*at_once])
+        offset -= 1
+        for rec in todo:
+            try:
+                hash_text = hash_path(os.path.join(opt.mntpnts[rec.uuid_text], rec.path))
+                hash_pk, new = get_or_make_pk(opt, 'hash', {'hash_text': hash_text})
+                file_hash, new = get_or_make_rec(opt, 'file_hash', {'file_hash': rec.file_hash})
+                assert not new
+                file_hash.hash = hash_pk
+                file_hash.date = opt.run_time
+                save_rec(opt, file_hash)
+            except FileNotFoundError:
+                print(rec.path, 'not found')
+                opt.n['offline/deleted'] += 1
+                pass
+        print(len(todo))
+        opt.con.commit()
 if __name__ == '__main__':
     main()
