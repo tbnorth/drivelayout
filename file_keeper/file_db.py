@@ -5,16 +5,23 @@ Terry Brown, terrynbrown@gmail.com, Sun Apr 22 16:36:40 2018
 """
 
 import argparse
+import json
 import os
 import sqlite3
 import sys
 import time
 
+from collections import defaultdict
+from hashlib import sha1
+from subprocess import Popen, PIPE
+
 from addict import Dict
-from drivelayout import stat_devs # dsz
+from drivelayout import stat_devs  # FIXME: replace with lsblk wrapper
 
 # field names to os.stat() attributes
 FLD2STAT = (('size', 'st_size'), ('mtime', 'st_mtime'), ('inode', 'st_ino'))
+
+BLKSIZE = 10000000  # amount to read when hashing files
 
 if sys.version_info < (3, 6):
     # need dict insertion order
@@ -36,41 +43,58 @@ def get_options(args=None):
     opt = make_parser().parse_args(args)
 
     # modifications / validations go here
-    canonical = can_path(opt.path)
-    if opt.path != canonical:
-        print("%s -> %s" % (opt.path, canonical))
-        opt.path = canonical
-    opt.stat = os.stat(opt.path)
+    if opt.path:
+        canonical = can_path(opt.path)
+        if opt.path != canonical:
+            print("%s -> %s" % (opt.path, canonical))
+            opt.path = canonical
+        opt.stat = os.stat(opt.path)
+
     opt.run_time = int(time.time())
 
     return opt
 
 def make_parser():
 
-     parser = argparse.ArgumentParser(
-         description="""general description""",
-         formatter_class=argparse.ArgumentDefaultsHelpFormatter
-     )
+    parser = argparse.ArgumentParser(
+        description="""general description""",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
 
-     parser.add_argument("--foo", action='store_true',
-         help="xxx"
-     )
-     parser.add_argument("--db-file", default='file_keeper.db',
-         help="Path to DB file"
-     )
-     parser.add_argument("--path",
-         help="Path to process"
-     )
-     parser.add_argument("--min-size", type=int, default=1000000,
-         help="Minimum file size to process"
-     )
+    # settings
+    parser.add_argument("--db-file", default='file_keeper.db',
+        help="Path to DB file"
+    )
+    parser.add_argument("--path",
+        help="Path to process"
+    )
+    parser.add_argument("--min-size", type=int, default=1000000,
+        help="Minimum file size to process", metavar='BYTES'
+    )
+    parser.add_argument("--max-hash-age", type=int, default=30,
+        help="Re-hash files with hashes older than DAYS", metavar='DAYS'
+    )
 
-     return parser
+    #actions
+
+    parser.add_argument("--update-hashes", action='store_true',
+        help="Update hashes for files"
+    )
+
+
+    return parser
 
 def can_path(path):
     """Return canonical path"""
     return os.path.abspath(os.path.realpath(os.path.expanduser(path)))
 
+def do_query(opt, q, vals=None):
+    opt.cur.execute(q, vals or [])
+    res = opt.cur.fetchall()
+    return [
+        Dict(zip([i[0] for i in opt.cur.description], i))
+        for i in res
+    ]
 def stat_devs_list():
     """Make sorted list of mounted partitions from stat_devs() output"""
     devs, mntpnts = stat_devs()
@@ -86,6 +110,15 @@ def stat_devs_list():
                 ans.append(d)
     return ans
 
+def get_devs():
+    """get_devs - get output from `lsblk`
+
+    Returns:
+        Dict: lsblk output
+    """
+    cmd = Popen(['lsblk', '--json', '--output-all'], stdout=PIPE)
+    out, err = cmd.communicate()
+    return Dict(json.loads(out))
 def get_pk(opt, table, ident, return_obj=False):
     q = "select {table} from {table} where {vals}".format(
         table=table, vals=' and '.join('%s=?' % k for k in ident))
@@ -119,10 +152,28 @@ def get_or_make_pk(opt, table, ident, defaults=None, return_obj=False):
 
 def get_or_make_rec(opt, table, ident, defaults=None):
     return get_or_make_pk(opt, table, ident, defaults=defaults, return_obj=True)
+def hash_path(path):
+    """hash_path - hash a file path
+
+    Args:
+        path (str): path to file
+    Returns:
+        str: hex hash for file
+    """
+    ans = sha1()
+    with open(path, 'rb') as data:
+        while True:
+            block = data.read(BLKSIZE)
+            ans.update(block)
+            if len(block) != BLKSIZE:
+                break
+
+    return ans.hexdigest()
 def proc_file(opt, dev, filepath):
     if not os.path.isfile(filepath):
         return
     stat = os.stat(filepath)
+    opt.n['stated'] += 1
     file_rec, new = get_or_make_rec(opt, 'file',
         ident=dict(
             uuid=opt.uuid,
@@ -140,12 +191,17 @@ def proc_file(opt, dev, filepath):
             if getattr(file_rec, k) != getattr(stat, v)
         ]
         if changes:
+            opt.n['changed_stat'] += 1
             print("%s changed (%s)" % (filepath, ', '.join(changes)))
             for k,v in FLD2STAT:
                 setattr(file_rec, k, getattr(stat, v))
             save_rec(opt, file_rec)
+        else:
+            opt.n['unchanged_stat'] += 1
+    else:
+        opt.n['new'] += 1
 
-    file_rec, new = get_or_make_rec(opt, 'file_hash',
+    file_hash, new = get_or_make_rec(opt, 'file_hash',
         ident=dict(file=file_rec.file),
         defaults=dict(
             size=stat.st_size,
@@ -170,6 +226,21 @@ def main():
 
     opt = get_options()
     opt.con, opt.cur = get_or_make_db(opt)
+    opt.n = defaultdict(lambda: 0)
+    opt.n['run_time'] = time.time()
+    opt.dev = get_devs()
+    opt.mntpnts = {}
+    def mntpnts(nodes, d):
+        for node in nodes:
+            if node.get('uuid'):
+                d[node['uuid']] = node.get('mountpoint')
+            mntpnts(node.get('children', []), d)
+    mntpnts(opt.dev["blockdevices"], opt.mntpnts)
+
+    for action in ['update_hashes']:
+        if getattr(opt, action):
+            globals()[action](opt)
+            return
 
     for dev in stat_devs_list():
         if opt.stat.st_dev == dev.stat.st_dev:
@@ -178,9 +249,7 @@ def main():
     else:
         raise Exception("No device for path")
 
-    opt.con.commit()
-
-
+    show_stats(opt)
 def get_or_make_db(opt):
     exists = os.path.exists(opt.db_file)
     con = sqlite3.connect(opt.db_file)
@@ -203,6 +272,56 @@ def save_rec(opt, rec):
         table=table, pk=pk,
         values=','.join('%s=?' % i[0] for i in vals)
     )
-    opt.cur.execute(q, [i[1] for i in vals])
+    try:
+        opt.cur.execute(q, [i[1] for i in vals])
+    except:
+        print(q)
+        print([i[1] for i in vals])
+        raise
+def show_stats(opt):
+    opt.n['run_time'] = time.time() - opt.n['run_time']
+    opt.n['stat_per_sec'] = int(opt.n['stated'] / opt.n['run_time'])
+    width = max(len(i) for i in opt.n)  # max. key length
+    for k, v in opt.n.items():
+        print("%s: %s" % ((' '*width+k)[-width:], v))
+
+    opt.con.commit()
+
+def update_hashes(opt):
+    """update_hashes - update hashes, oldest first
+
+    Args:
+        opt (argparse namespace): options
+    """
+    def get_todo():
+        return do_query(opt, """
+select *
+  from (select * from file join file_hash using (file) join uuid using (uuid)) as x
+       left join hash using (hash)
+ where ?-date > ? or hash is null
+ order by hash is null desc, date
+ limit 1000
+""", [time.time(), 24*60*60*opt.max_hash_age])
+
+    todo = get_todo()
+
+    print(todo)
+    while todo:
+        rec = todo.pop(0)
+        print(rec.path)
+        try:
+            hash_text = hash_path(os.path.join(opt.mntpnts[rec.uuid_text], rec.path))
+            hash_pk, new = get_or_make_pk(opt, 'hash', {'hash_text': hash_text})
+            file_hash, new = get_or_make_rec(opt, 'file_hash', {'file_hash': rec.file_hash})
+            assert not new
+            file_hash.hash = hash_pk
+            file_hash.date = opt.run_time
+            save_rec(opt, file_hash)
+        except FileNotFoundError:
+            pass
+        if not todo:
+            opt.con.commit()
+            todo = get_todo()
+    opt.con.commit()
 if __name__ == '__main__':
     main()

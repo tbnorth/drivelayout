@@ -9,3 +9,24 @@ Utilities for keeping an archive of unique files.
    - no, premature optimization
  - paths are always canonicalized, but...
  - use partition UUID / path relative to mount point?
+
+## Operations
+
+ - report stats
+   - number / size of files
+   - hash existence / freshness
+ - report duplicates
+ - scan for changes
+   - by time/size/inode
+   - by hash
+ - scan for new files
+ - accept changes to old files
+ - generate hashes
+   - missing hashes
+   - confirm old, update datestamp
+ - find duplicate directories
+   - hash of hashes?
+ - report deleted
+   - confirm copies
+ - forget deleted (copies, all)
+
