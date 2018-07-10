@@ -71,6 +71,9 @@ def make_parser():
     parser.add_argument("--update-hashes", action='store_true',
         help="Update hashes for files"
     )
+    parser.add_argument("--accept-current", action='store_true',
+        help="Accept current files as correct"
+    )
 
 
     return parser
@@ -82,10 +85,8 @@ def can_path(path):
 def do_query(opt, q, vals=None):
     opt.cur.execute(q, vals or [])
     res = opt.cur.fetchall()
-    return [
-        Dict(zip([i[0] for i in opt.cur.description], i))
-        for i in res
-    ]
+    flds = [i[0] for i in opt.cur.description]
+    return [Dict(zip(flds, i)) for i in res]
 
 def do_one(opt, q, vals=None):
     ans = do_query(opt, q, vals=vals)
@@ -101,25 +102,31 @@ def get_devs():
     cmd = Popen(['lsblk', '--json', '--output-all'], stdout=PIPE)
     out, err = cmd.communicate()
     return Dict(json.loads(out))
-def get_pk(opt, table, ident, return_obj=False):
+def get_pk(opt, table, ident, return_obj=False, multi=False):
     q = "select {table} from {table} where {vals}".format(
         table=table, vals=' and '.join('%s=?' % k for k in ident))
     if return_obj:
         q = q.replace(table, '*', 1)  # replace first <table>
     opt.cur.execute(q, list(ident.values()))
     res = opt.cur.fetchall()
-    if len(res) > 1:
+    if len(res) > 1 and not multi:
         raise Exception("More than on result for %s %s" % (table, ident))
     if res:
-        if return_obj:
-            return Dict(zip([i[0] for i in opt.cur.description], res[0]))
+        if multi:
+            if return_obj:
+                flds = [i[0] for i in opt.cur.description]
+                return [Dict(zip(flds, i)) for i in res]
+            else:
+                return [i[0] for i in res]
         else:
-            return res[0][0]
+            if return_obj:
+                return Dict(zip([i[0] for i in opt.cur.description], res[0]))
+            else:
+                return res[0][0]
     else:
         return None
-
-def get_rec(opt, table, ident):
-    return get_pk(opt, table, ident, return_obj=True)
+def get_rec(opt, table, ident, multi=False):
+    return get_pk(opt, table, ident, return_obj=True, multi=multi)
 def get_or_make_pk(opt, table, ident, defaults=None, return_obj=False):
     res = get_pk(opt, table, ident, return_obj=return_obj)
     if res:
@@ -132,8 +139,13 @@ def get_or_make_pk(opt, table, ident, defaults=None, return_obj=False):
             list(defaults.values()))
         return get_pk(opt, table, defaults, return_obj=return_obj), True
 
+def get_pks(opt, table, ident, return_obj=False):
+    return get_pk(opt, table, ident, return_obj=return_obj, multi=True)
 def get_or_make_rec(opt, table, ident, defaults=None):
     return get_or_make_pk(opt, table, ident, defaults=defaults, return_obj=True)
+
+def get_recs(opt, table, ident):
+    return get_rec(opt, table, ident, multi=True)
 def hash_path(path):
     """hash_path - hash a file path
 
@@ -168,15 +180,22 @@ def proc_file(opt, dev, filepath):
     )
 
     if not new:
+        # old/new pairs for size / mtime / inode
+        stats = [
+            (getattr(file_rec, k), getattr(stat, v))
+            for k,v in FLD2STAT
+        ]
+        # name/old/new tuples for changed values, e.g. 'size',234,345
         changes = [
-            k for k,v in FLD2STAT
-            if getattr(file_rec, k) != getattr(stat, v)
+            (k[0], s[0], s[1]) for k,s in zip(FLD2STAT, stats)
+            if s[0] != s[1]
         ]
         if changes:
             opt.n['changed_stat'] += 1
-            print("%s changed (%s)" % (filepath, ', '.join(changes)))
-            for k,v in FLD2STAT:
-                setattr(file_rec, k, getattr(stat, v))
+            print("%s changed (%s)" % (filepath, ', '.join('%s:%s→%s' % i for i in changes)))
+            if opt.accept_current:
+                for k,v in FLD2STAT:
+                    setattr(file_rec, k, getattr(stat, v))
             save_rec(opt, file_rec)
         else:
             opt.n['unchanged_stat'] += 1
@@ -242,6 +261,8 @@ def main():
     else:
         raise Exception("No device for path %s" % opt.path)
 
+    opt.con.commit()
+
     show_stats(opt)
 def get_or_make_db(opt):
     exists = os.path.exists(opt.db_file)
@@ -277,8 +298,6 @@ def show_stats(opt):
     width = max(len(i) for i in opt.n)  # max. key length
     for k, v in opt.n.items():
         print("%s: %s" % ((' '*width+k)[-width:], v))
-
-    opt.con.commit()
 
 def update_hashes(opt):
     """update_hashes - update hashes, oldest first
