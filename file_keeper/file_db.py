@@ -202,13 +202,16 @@ def proc_file(opt, dev, filepath):
     else:
         opt.n['new'] += 1
 
-    file_hash, new = get_or_make_rec(opt, 'file_hash',
-        ident=dict(file=file_rec.file),
-        defaults=dict(
-            size=stat.st_size,
-            date=opt.run_time
+    file_hashes = do_query(opt,
+        'select * from file_hash where file=? order by date', [file_rec.file])
+    if not file_hashes:
+        file_hash, new = get_or_make_rec(opt, 'file_hash',
+            ident=dict(file=file_rec.file),
+            defaults=dict(
+                size=stat.st_size,
+                date=opt.run_time
+            )
         )
-    )
 def proc_dev(opt, uuid):
     dev = opt.mntpnts[uuid]
     dev.setdefault('label', '???')
