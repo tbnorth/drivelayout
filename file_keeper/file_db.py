@@ -16,7 +16,6 @@ from hashlib import sha1
 from subprocess import Popen, PIPE
 
 from addict import Dict
-from drivelayout import stat_devs  # FIXME: replace with lsblk wrapper
 
 # field names to os.stat() attributes
 FLD2STAT = (('size', 'st_size'), ('mtime', 'st_mtime'), ('inode', 'st_ino'))
@@ -43,14 +42,6 @@ def get_options(args=None):
     opt = make_parser().parse_args(args)
 
     # modifications / validations go here
-    if opt.path:
-        canonical = can_path(opt.path)
-        if opt.path != canonical:
-            print("%s -> %s" % (opt.path, canonical))
-            opt.path = canonical
-        opt.stat = os.stat(opt.path)
-
-    opt.run_time = int(time.time())
 
     return opt
 
@@ -101,21 +92,6 @@ def do_one(opt, q, vals=None):
     if len(ans) != 1:
         raise Exception("'%s' did not produce a single record response" % q)
     return ans[0]
-def stat_devs_list():
-    """Make sorted list of mounted partitions from stat_devs() output"""
-    devs, mntpnts = stat_devs()
-    ans = []
-    for dev in sorted(devs):
-        for part in sorted(devs[dev]):
-            d = Dict((k.lower(), v) for k, v in devs[dev][part].items())
-            d.dev = dev
-            d.part = part
-            if part in mntpnts:
-                d.mntpnt = mntpnts[part]
-                d.stat = os.stat(d.mntpnt)
-                ans.append(d)
-    return ans
-
 def get_devs():
     """get_devs - get output from `lsblk`
 
@@ -214,12 +190,13 @@ def proc_file(opt, dev, filepath):
             date=opt.run_time
         )
     )
-def proc_dev(opt, dev):
+def proc_dev(opt, uuid):
+    dev = opt.mntpnts[uuid]
     dev.setdefault('label', '???')
-    print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
-    opt.base = os.path.relpath(opt.path, start=dev.mntpnt)
-    opt.mntpnt = dev.mntpnt
-    assert os.path.join(dev.mntpnt, opt.base) == opt.path
+    print("{name} ({label}, {uuid}) on {mountpoint}".format(**dev))
+    opt.base = os.path.relpath(opt.path, start=dev.mountpoint)
+    opt.mntpnt = dev.mountpoint
+    assert os.path.join(dev.mountpoint, opt.base) == opt.path
     print(opt.base)
     opt.uuid, new = get_or_make_pk(opt, 'uuid', {'uuid_text': dev.uuid})
     c = 0
@@ -232,6 +209,13 @@ def proc_dev(opt, dev):
 def main():
 
     opt = get_options()
+    if opt.path:
+        canonical = can_path(opt.path)
+        if opt.path != canonical:
+            print("%s -> %s" % (opt.path, canonical))
+            opt.path = canonical
+        opt.stat = os.stat(opt.path)
+    opt.run_time = int(time.time())
     opt.con, opt.cur = get_or_make_db(opt)
     opt.n = defaultdict(lambda: 0)
     opt.n['run_time'] = time.time()
@@ -240,7 +224,8 @@ def main():
     def mntpnts(nodes, d):
         for node in nodes:
             if node.get('uuid'):
-                d[node['uuid']] = node.get('mountpoint')
+                d[node['uuid']] = Dict()
+                d[node['uuid']].update(node)
             mntpnts(node.get('children', []), d)
     mntpnts(opt.dev["blockdevices"], opt.mntpnts)
 
@@ -249,12 +234,13 @@ def main():
             globals()[action](opt)
             return
 
-    for dev in stat_devs_list():
-        if opt.stat.st_dev == dev.stat.st_dev:
-            proc_dev(opt, dev)
+    majmin = '%s:%s' % (os.major(opt.stat.st_dev), os.minor(opt.stat.st_dev))
+    for uuid in opt.mntpnts:
+        if opt.mntpnts[uuid]['maj:min'] == majmin:
+            proc_dev(opt, uuid)
             break
     else:
-        raise Exception("No device for path")
+        raise Exception("No device for path %s" % opt.path)
 
     show_stats(opt)
 def get_or_make_db(opt):
@@ -328,7 +314,7 @@ select * from file join file_hash using (file) join uuid using (uuid)
         offset -= 1
         for rec in todo:
             try:
-                hash_text = hash_path(os.path.join(opt.mntpnts[rec.uuid_text], rec.path))
+                hash_text = hash_path(os.path.join(opt.mntpnts[rec.uuid_text].mountpoint, rec.path))
                 hash_pk, new = get_or_make_pk(opt, 'hash', {'hash_text': hash_text})
                 file_hash, new = get_or_make_rec(opt, 'file_hash', {'file_hash': rec.file_hash})
                 assert not new
