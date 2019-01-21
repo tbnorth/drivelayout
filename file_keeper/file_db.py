@@ -11,7 +11,7 @@ import sqlite3
 import sys
 import time
 
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from hashlib import sha1
 from subprocess import Popen, PIPE
 
@@ -27,6 +27,19 @@ if sys.version_info < (3, 6):
     # need dict insertion order
     print("file_db.py requires Python >= 3.6")
     exit(10)
+
+
+def sqlite_types(dbfile):
+    """Return dict of namedtuples for a sqlite3 DB"""
+    con = sqlite3.connect(dbfile)
+    cur = con.cursor()
+    q = "select name from sqlite_master where type='table'"
+    tables = [i[0] for i in cur.execute(q)]
+    ans = {}
+    for table in tables:
+        cur.execute("select * from %s limit 0" % table)
+        ans[table] = namedtuple(table, [i[0] for i in cur.description])
+    return ans
 
 
 def get_options(args=None):
@@ -90,7 +103,32 @@ def make_parser():
         "--update-hashes", action='store_true', help="Update hashes for files"
     )
 
+    parser.add_argument("--list-files", action='store_true', help="List files")
+
     return parser
+
+
+def get_files(opt):
+    """Iterate files in DB
+
+    Args:
+        opt (argparse Namespace): options
+    """
+    q = ["select * from file"]
+    for res in opt.cur.execute(' '.join(q)):
+        yield res
+
+
+def list_files(opt):
+    """List files in DB
+
+    Args:
+        opt (argparse Namespace): options
+    """
+    type_ = sqlite_types(opt.db_file)
+    for path in get_files(opt):
+        path = type_['file']._make(path)
+        print(path)
 
 
 def can_path(path):
@@ -268,7 +306,7 @@ def main():
 
     mntpnts(opt.dev["blockdevices"], opt.mntpnts)
 
-    for action in ['update_hashes']:
+    for action in ['list_files', 'update_hashes']:
         if getattr(opt, action):
             globals()[action](opt)
             return
