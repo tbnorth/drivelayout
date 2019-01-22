@@ -102,8 +102,10 @@ def make_parser():
     parser.add_argument(
         "--update-hashes", action='store_true', help="Update hashes for files"
     )
-
     parser.add_argument("--list-files", action='store_true', help="List files")
+    parser.add_argument(
+        "--list-dupes", action='store_true', help="List duplicates"
+    )
 
     return parser
 
@@ -114,7 +116,7 @@ def get_files(opt):
     Args:
         opt (argparse Namespace): options
     """
-    q = ["select * from file"]
+    q = ["select * from file order by size desc"]
     for res in opt.cur.execute(' '.join(q)):
         yield res
 
@@ -129,6 +131,26 @@ def list_files(opt):
     for path in get_files(opt):
         path = type_['file']._make(path)
         print(path)
+
+
+def dupe_check(todo):
+    return
+
+
+def list_dupes(opt):
+
+    type_ = sqlite_types(opt.db_file)
+    size = None
+    todo = []
+    for path in get_files(opt):
+        path = type_['file']._make(path)
+        if size != path.size:
+            if todo:
+                dupe_check(todo)
+            size = path.size
+            todo = [path]
+        else:
+            todo.append(path)
 
 
 def can_path(path):
@@ -306,7 +328,7 @@ def main():
 
     mntpnts(opt.dev["blockdevices"], opt.mntpnts)
 
-    for action in ['list_files', 'update_hashes']:
+    for action in ['list_dupes', 'list_files', 'update_hashes']:
         if getattr(opt, action):
             globals()[action](opt)
             return
