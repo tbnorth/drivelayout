@@ -21,6 +21,11 @@ from drivelayout import stat_devs  # FIXME: replace with lsblk wrapper
 if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
+
+class FileKeeperError(Exception):
+    pass
+
+
 # field names matching os.stat() attributes
 STATFLDS = 'st_size', 'st_mtime', 'st_ino'
 
@@ -98,6 +103,10 @@ def make_parser():
         default=30,
         help="Re-hash files with hashes older than DAYS",
         metavar='DAYS',
+    )
+
+    parser.add_argument(
+        "--dry-run", action='store_true', help="Make new changes to DB"
     )
 
     # actions
@@ -349,7 +358,14 @@ def main():
 
 def get_or_make_db(opt):
     exists = os.path.exists(opt.db_file)
-    con = sqlite3.connect(opt.db_file)
+    if not exists and opt.dry_run:
+        raise FileKeeperError(
+            "--dry-run: can't create database, no file '%s'" % opt.db_file
+        )
+    if opt.dry_run:
+        con = sqlite3.connect("file:%s?mode=ro" % opt.db_file)
+    else:
+        con = sqlite3.connect(opt.db_file)
     if not exists:
         for cmd in open('file_db.sql').read().split(';\n'):
             con.execute(cmd)
