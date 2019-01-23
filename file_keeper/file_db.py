@@ -18,6 +18,9 @@ from subprocess import Popen, PIPE
 from addict import Dict
 from drivelayout import stat_devs  # FIXME: replace with lsblk wrapper
 
+if sys.version_info[0] < 3:
+    FileNotFoundError = IOError
+
 # field names to os.stat() attributes
 FLD2STAT = (('size', 'st_size'), ('mtime', 'st_mtime'), ('inode', 'st_ino'))
 
@@ -127,9 +130,9 @@ def list_files(opt):
     Args:
         opt (argparse Namespace): options
     """
-    type_ = sqlite_types(opt.db_file)
-    for path in get_files(opt):
-        path = type_['file']._make(path)
+    # X type_ = sqlite_types(opt.db_file)
+    for path in do_query(opt, "select * from file order by size desc"):
+        # X path = type_['file']._make(path)
         print(path)
 
 
@@ -139,11 +142,9 @@ def dupe_check(todo):
 
 def list_dupes(opt):
 
-    type_ = sqlite_types(opt.db_file)
     size = None
     todo = []
-    for path in get_files(opt):
-        path = type_['file']._make(path)
+    for path in do_query(opt, "select * from file order by size desc"):
         if size != path.size:
             if todo:
                 dupe_check(todo)
@@ -161,6 +162,8 @@ def can_path(path):
 def do_query(opt, q, vals=None):
     opt.cur.execute(q, vals or [])
     res = opt.cur.fetchall()
+    # this can consume a lot of RAM, but avoids blocking DB calls
+    # i.e. making other queries while still consuming this result
     return [Dict(zip([i[0] for i in opt.cur.description], i)) for i in res]
 
 
