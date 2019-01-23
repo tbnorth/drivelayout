@@ -19,6 +19,7 @@ create table file (    -- files
     st_size integer,   -- size of file
     st_mtime integer,  -- modification time of file
     hash text,         -- file's hash
+    hash_date integer, -- date on which the file had that hash
     FOREIGN KEY(uuid) REFERENCES uuid(uuid)
 );
 create index idx_file_path on file(path);
@@ -27,11 +28,11 @@ create table file_hash (    -- hashes for a file, M2M
     file_hash INTEGER PRIMARY KEY,
     file integer,
     hash integer,
-    date date,      -- date on which the file had that size / hash
+    hash_date integer, -- date on which the file had that size / hash
     st_size integer,   -- size of file, userful even without hash
     FOREIGN KEY(file) REFERENCES file(file),
     FOREIGN KEY(hash) REFERENCES hash(hash)
 );
 create index idx_file_hash_file on file_hash (file);
 create index idx_file_hash_hash on file_hash (hash);
-create index idx_file_hash_date on file_hash (date);
+create index idx_file_hash_date on file_hash (hash_date);

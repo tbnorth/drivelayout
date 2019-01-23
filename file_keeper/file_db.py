@@ -295,7 +295,7 @@ def proc_file(opt, dev, filepath):
         opt,
         'file_hash',
         ident=dict(file=file_rec.file),
-        defaults=dict(st_size=stat.st_size, date=opt.run_time),
+        defaults=dict(st_size=stat.st_size, hash_date=opt.run_time),
     )
 
 
