@@ -21,8 +21,8 @@ from drivelayout import stat_devs  # FIXME: replace with lsblk wrapper
 if sys.version_info[0] < 3:
     FileNotFoundError = IOError
 
-# field names to os.stat() attributes
-FLD2STAT = (('size', 'st_size'), ('mtime', 'st_mtime'), ('inode', 'st_ino'))
+# field names matching os.stat() attributes
+STATFLDS = 'st_size', 'st_mtime', 'st_ino'
 
 BLKSIZE = 10000000  # amount to read when hashing files
 
@@ -119,7 +119,7 @@ def get_files(opt):
     Args:
         opt (argparse Namespace): options
     """
-    q = ["select * from file order by size desc"]
+    q = ["select * from file order by st_size desc"]
     for res in opt.cur.execute(' '.join(q)):
         yield res
 
@@ -131,7 +131,7 @@ def list_files(opt):
         opt (argparse Namespace): options
     """
     # X type_ = sqlite_types(opt.db_file)
-    for path in do_query(opt, "select * from file order by size desc"):
+    for path in do_query(opt, "select * from file order by st_size desc"):
         # X path = type_['file']._make(path)
         print(path)
 
@@ -144,11 +144,11 @@ def list_dupes(opt):
 
     size = None
     todo = []
-    for path in do_query(opt, "select * from file order by size desc"):
-        if size != path.size:
+    for path in do_query(opt, "select * from file order by st_size desc"):
+        if size != path.st_size:
             if todo:
                 dupe_check(todo)
-            size = path.size
+            size = path.st_size
             todo = [path]
         else:
             todo.append(path)
@@ -272,19 +272,19 @@ def proc_file(opt, dev, filepath):
             uuid=opt.uuid, path=os.path.relpath(filepath, start=opt.mntpnt)
         ),
         defaults=dict(
-            inode=stat.st_ino, size=stat.st_size, mtime=stat.st_mtime
+            st_ino=stat.st_ino, st_size=stat.st_size, st_mtime=stat.st_mtime
         ),
     )
 
     if not new:
         changes = [
-            k for k, v in FLD2STAT if getattr(file_rec, k) != getattr(stat, v)
+            k for k in STATFLDS if getattr(file_rec, k) != getattr(stat, k)
         ]
         if changes:
             opt.n['changed_stat'] += 1
             print("%s changed (%s)" % (filepath, ', '.join(changes)))
-            for k, v in FLD2STAT:
-                setattr(file_rec, k, getattr(stat, v))
+            for k in STATFLDS:
+                setattr(file_rec, k, getattr(stat, k))
             save_rec(opt, file_rec)
         else:
             opt.n['unchanged_stat'] += 1
@@ -295,11 +295,12 @@ def proc_file(opt, dev, filepath):
         opt,
         'file_hash',
         ident=dict(file=file_rec.file),
-        defaults=dict(size=stat.st_size, date=opt.run_time),
+        defaults=dict(st_size=stat.st_size, date=opt.run_time),
     )
 
 
 def proc_dev(opt, dev):
+    dev.setdefault('label', '???')
     print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
     opt.base = os.path.relpath(opt.path, start=dev.mntpnt)
     opt.mntpnt = dev.mntpnt

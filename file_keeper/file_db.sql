@@ -15,19 +15,20 @@ create table file (    -- files
     file INTEGER PRIMARY KEY,
     uuid integer,      -- uuid of drive (partition, but not partuuid)
     path text,         -- path to file
-    inode integer,     -- inode of file
-    size integer,      -- size of file
-    mtime integer,     -- modification time of file
+    st_ino integer,    -- inode of file
+    st_size integer,   -- size of file
+    st_mtime integer,  -- modification time of file
+    hash text,         -- file's hash
     FOREIGN KEY(uuid) REFERENCES uuid(uuid)
 );
 create index idx_file_path on file(path);
-create index idx_file_size on file(size);
+create index idx_file_size on file(st_size);
 create table file_hash (    -- hashes for a file, M2M
     file_hash INTEGER PRIMARY KEY,
     file integer,
     hash integer,
     date date,      -- date on which the file had that size / hash
-    size integer,   -- size of file, userful even without hash
+    st_size integer,   -- size of file, userful even without hash
     FOREIGN KEY(file) REFERENCES file(file),
     FOREIGN KEY(hash) REFERENCES hash(hash)
 );
