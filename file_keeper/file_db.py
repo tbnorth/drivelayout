@@ -11,15 +11,12 @@ import sqlite3
 import sys
 import time
 
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from hashlib import sha1
 from subprocess import Popen, PIPE
 
 from addict import Dict
 from drivelayout import stat_devs  # FIXME: replace with lsblk wrapper
-
-if sys.version_info[0] < 3:
-    FileNotFoundError = IOError
 
 
 class FileKeeperError(Exception):
@@ -34,20 +31,8 @@ BLKSIZE = 10000000  # amount to read when hashing files
 if sys.version_info < (3, 6):
     # need dict insertion order
     print("file_db.py requires Python >= 3.6")
+    FileNotFoundError = IOError  # for linters
     exit(10)
-
-
-def sqlite_types(dbfile):
-    """Return dict of namedtuples for a sqlite3 DB"""
-    con = sqlite3.connect(dbfile)
-    cur = con.cursor()
-    q = "select name from sqlite_master where type='table'"
-    tables = [i[0] for i in cur.execute(q)]
-    ans = {}
-    for table in tables:
-        cur.execute("select * from %s limit 0" % table)
-        ans[table] = namedtuple(table, [i[0] for i in cur.description])
-    return ans
 
 
 def get_options(args=None):
@@ -122,26 +107,13 @@ def make_parser():
     return parser
 
 
-def get_files(opt):
-    """Iterate files in DB
-
-    Args:
-        opt (argparse Namespace): options
-    """
-    q = ["select * from file order by st_size desc"]
-    for res in opt.cur.execute(' '.join(q)):
-        yield res
-
-
 def list_files(opt):
     """List files in DB
 
     Args:
         opt (argparse Namespace): options
     """
-    # X type_ = sqlite_types(opt.db_file)
     for path in do_query(opt, "select * from file order by st_size desc"):
-        # X path = type_['file']._make(path)
         print(path)
 
 
