@@ -137,12 +137,17 @@ def can_path(path):
 
 
 def do_query(opt, q, vals=None):
+    select = q.lower().strip().startswith('select')
+    if opt.dry_run and not select:
+        return
     try:
         opt.cur.execute(q, vals or [])
     except Exception:
         print(q)
         print(vals)
         raise
+    if not select:
+        return None
     res = opt.cur.fetchall()
     flds = [i[0] for i in opt.cur.description]
     if False:
@@ -211,7 +216,8 @@ def get_or_make_pk(opt, table, ident, defaults=None, return_obj=False):
     else:
         defaults = defaults.copy() if defaults else dict()
         defaults.update(ident)
-        opt.cur.execute(
+        do_query(
+            opt,
             'insert into {table} ({fields}) values ({values})'.format(
                 table=table,
                 fields=','.join(defaults),
@@ -374,7 +380,7 @@ def get_or_make_db(opt):
         con = sqlite3.connect(opt.db_file)
     if not exists:
         for cmd in open('file_db.sql').read().split(';\n'):
-            con.execute(cmd)
+            con.execute(cmd)  # can't use do_query here, that's OK
     cur = con.cursor()
     return con, cur
 
@@ -392,13 +398,7 @@ def save_rec(opt, rec):
     q = 'update {table} set {values} where {table} = {pk}'.format(
         table=table, pk=pk, values=','.join('%s=?' % i[0] for i in vals)
     )
-    try:
-        # if not opt.dry_run:
-        opt.cur.execute(q, [i[1] for i in vals])
-    except Exception:
-        print(q)
-        print([i[1] for i in vals])
-        raise
+    do_query(opt, q, [i[1] for i in vals])
 
 
 def show_stats(opt):
