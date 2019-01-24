@@ -141,11 +141,18 @@ def do_query(opt, q, vals=None):
         opt.cur.execute(q, vals or [])
     except Exception:
         print(q)
+        print(vals)
         raise
     res = opt.cur.fetchall()
+    flds = [i[0] for i in opt.cur.description]
+    if False:
+        print(q)
+        print(vals)
+        print(res)
+        print([Dict(zip(flds, i)) for i in res])
     # this can consume a lot of RAM, but avoids blocking DB calls
     # i.e. making other queries while still consuming this result
-    return [Dict(zip([i[0] for i in opt.cur.description], i)) for i in res]
+    return [Dict(zip(flds, i)) for i in res]
 
 
 def do_one(opt, q, vals=None):
@@ -174,22 +181,21 @@ def get_pk(opt, table, ident, return_obj=False, multi=False):
     )
     if return_obj:
         q = q.replace(table, '*', 1)  # replace first <table>
-    opt.cur.execute(q, list(ident.values()))
-    res = opt.cur.fetchall()
+    res = do_query(opt, q, list(ident.values()))
+
     if len(res) > 1 and not multi:
         raise Exception("More than on result for %s %s" % (table, ident))
     if res:
         if multi:
             if return_obj:
-                flds = [i[0] for i in opt.cur.description]
-                return [Dict(zip(flds, i)) for i in res]
+                return res
             else:
-                return [i[0] for i in res]
+                return [i[table] for i in res]
         else:
             if return_obj:
-                return Dict(zip([i[0] for i in opt.cur.description], res[0]))
+                return res[0]
             else:
-                return res[0][0]
+                return res[0][table]
     else:
         return None
 
@@ -305,6 +311,7 @@ def proc_dev(opt, uuid):
 
     print(opt.base)
     opt.uuid, new = get_or_make_pk(opt, 'uuid', {'uuid_text': dev.uuid})
+    assert opt.uuid, opt.uuid
     c = 0
     for path, dirs, files in os.walk(opt.path):
         for filename in files:
