@@ -16,7 +16,6 @@ from hashlib import sha1
 from subprocess import Popen, PIPE
 
 from addict import Dict
-from drivelayout import stat_devs  # FIXME: replace with lsblk wrapper
 
 
 class FileKeeperError(Exception):
@@ -51,14 +50,6 @@ def get_options(args=None):
     opt = make_parser().parse_args(args)
 
     # modifications / validations go here
-    if opt.path:
-        canonical = can_path(opt.path)
-        if opt.path != canonical:
-            print("%s -> %s" % (opt.path, canonical))
-            opt.path = canonical
-        opt.stat = os.stat(opt.path)
-
-    opt.run_time = int(time.time())
 
     return opt
 
@@ -102,6 +93,11 @@ def make_parser():
     parser.add_argument("--list-files", action='store_true', help="List files")
     parser.add_argument(
         "--list-dupes", action='store_true', help="List duplicates"
+    )
+    parser.add_argument(
+        "--accept-current",
+        action='store_true',
+        help="Accept current files as correct",
     )
 
     return parser
@@ -152,20 +148,11 @@ def do_query(opt, q, vals=None):
     return [Dict(zip([i[0] for i in opt.cur.description], i)) for i in res]
 
 
-def stat_devs_list():
-    """Make sorted list of mounted partitions from stat_devs() output"""
-    devs, mntpnts = stat_devs()
-    ans = []
-    for dev in sorted(devs):
-        for part in sorted(devs[dev]):
-            d = Dict((k.lower(), v) for k, v in devs[dev][part].items())
-            d.dev = dev
-            d.part = part
-            if part in mntpnts:
-                d.mntpnt = mntpnts[part]
-                d.stat = os.stat(d.mntpnt)
-                ans.append(d)
-    return ans
+def do_one(opt, q, vals=None):
+    ans = do_query(opt, q, vals=vals)
+    if len(ans) != 1:
+        raise Exception("'%s' did not produce a single record response" % q)
+    return ans[0]
 
 
 def get_devs():
@@ -179,7 +166,8 @@ def get_devs():
     return Dict(json.loads(out))
 
 
-def get_pk(opt, table, ident, return_obj=False):
+def get_pk(opt, table, ident, return_obj=False, multi=False):
+
     q = "select {table} from {table} where {vals}".format(
         table=table, vals=' and '.join('%s=?' % k for k in ident)
     )
@@ -187,19 +175,26 @@ def get_pk(opt, table, ident, return_obj=False):
         q = q.replace(table, '*', 1)  # replace first <table>
     opt.cur.execute(q, list(ident.values()))
     res = opt.cur.fetchall()
-    if len(res) > 1:
+    if len(res) > 1 and not multi:
         raise Exception("More than on result for %s %s" % (table, ident))
     if res:
-        if return_obj:
-            return Dict(zip([i[0] for i in opt.cur.description], res[0]))
+        if multi:
+            if return_obj:
+                flds = [i[0] for i in opt.cur.description]
+                return [Dict(zip(flds, i)) for i in res]
+            else:
+                return [i[0] for i in res]
         else:
-            return res[0][0]
+            if return_obj:
+                return Dict(zip([i[0] for i in opt.cur.description], res[0]))
+            else:
+                return res[0][0]
     else:
         return None
 
 
-def get_rec(opt, table, ident):
-    return get_pk(opt, table, ident, return_obj=True)
+def get_rec(opt, table, ident, multi=False):
+    return get_pk(opt, table, ident, return_obj=True, multi=multi)
 
 
 def get_or_make_pk(opt, table, ident, defaults=None, return_obj=False):
@@ -220,10 +215,18 @@ def get_or_make_pk(opt, table, ident, defaults=None, return_obj=False):
         return get_pk(opt, table, defaults, return_obj=return_obj), True
 
 
+def get_pks(opt, table, ident, return_obj=False):
+    return get_pk(opt, table, ident, return_obj=return_obj, multi=True)
+
+
 def get_or_make_rec(opt, table, ident, defaults=None):
     return get_or_make_pk(
         opt, table, ident, defaults=defaults, return_obj=True
     )
+
+
+def get_recs(opt, table, ident):
+    return get_rec(opt, table, ident, multi=True)
 
 
 def hash_path(path):
@@ -262,34 +265,43 @@ def proc_file(opt, dev, filepath):
     )
 
     if not new:
-        changes = [
-            k for k in STATFLDS if getattr(file_rec, k) != getattr(stat, k)
-        ]
+        # old/new pairs for size / mtime / inode
+        stats = [(k, getattr(file_rec, k), getattr(stat, k)) for k in STATFLDS]
+        # name/old/new tuples for changed values, e.g. 'size',234,345
+        changes = [i for i in stats if i[1] != i[2]]
         if changes:
             opt.n['changed_stat'] += 1
-            print("%s changed (%s)" % (filepath, ', '.join(changes)))
-            for k in STATFLDS:
-                setattr(file_rec, k, getattr(stat, k))
+            print(
+                "%s changed (%s)"
+                % (filepath, ', '.join('%s:%s→%s' % i for i in changes))
+            )
+            if opt.accept_current:
+                for k in STATFLDS:
+                    setattr(file_rec, k, getattr(stat, k))
+
             save_rec(opt, file_rec)
         else:
             opt.n['unchanged_stat'] += 1
     else:
         opt.n['new'] += 1
 
-    file_hash, new = get_or_make_rec(
-        opt,
-        'file_hash',
-        ident=dict(file=file_rec.file),
-        defaults=dict(st_size=stat.st_size, hash_date=opt.run_time),
-    )
+
+# ## def proc_dev(opt, dev):
+# ##     dev.setdefault('label', '???')
+# ##     print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
+# ##     opt.base = os.path.relpath(opt.path, start=dev.mntpnt)
+# ##     opt.mntpnt = dev.mntpnt
+# ##     assert os.path.join(dev.mntpnt, opt.base) == opt.path
 
 
-def proc_dev(opt, dev):
+def proc_dev(opt, uuid):
+    dev = opt.mntpnts[uuid]
     dev.setdefault('label', '???')
-    print("{part} ({label}, {uuid}) on {mntpnt}".format(**dev))
-    opt.base = os.path.relpath(opt.path, start=dev.mntpnt)
-    opt.mntpnt = dev.mntpnt
-    assert os.path.join(dev.mntpnt, opt.base) == opt.path
+    print("{name} ({label}, {uuid}) on {mountpoint}".format(**dev))
+    opt.base = os.path.relpath(opt.path, start=dev.mountpoint)
+    opt.mntpnt = dev.mountpoint
+    assert os.path.join(dev.mountpoint, opt.base) == opt.path
+
     print(opt.base)
     opt.uuid, new = get_or_make_pk(opt, 'uuid', {'uuid_text': dev.uuid})
     c = 0
@@ -302,6 +314,13 @@ def proc_dev(opt, dev):
 def main():
 
     opt = get_options()
+    if opt.path:
+        canonical = can_path(opt.path)
+        if opt.path != canonical:
+            print("%s -> %s" % (opt.path, canonical))
+            opt.path = canonical
+        opt.stat = os.stat(opt.path)
+    opt.run_time = int(time.time())
     opt.con, opt.cur = get_or_make_db(opt)
     opt.n = defaultdict(lambda: 0)
     opt.n['run_time'] = time.time()
@@ -311,7 +330,8 @@ def main():
     def mntpnts(nodes, d):
         for node in nodes:
             if node.get('uuid'):
-                d[node['uuid']] = node.get('mountpoint')
+                d[node['uuid']] = Dict()
+                d[node['uuid']].update(node)
             mntpnts(node.get('children', []), d)
 
     mntpnts(opt.dev["blockdevices"], opt.mntpnts)
@@ -321,12 +341,15 @@ def main():
             globals()[action](opt)
             return
 
-    for dev in stat_devs_list():
-        if opt.stat.st_dev == dev.stat.st_dev:
-            proc_dev(opt, dev)
+    majmin = '%s:%s' % (os.major(opt.stat.st_dev), os.minor(opt.stat.st_dev))
+    for uuid in opt.mntpnts:
+        if opt.mntpnts[uuid]['maj:min'] == majmin:
+            proc_dev(opt, uuid)
             break
     else:
-        raise Exception("No device for path")
+        raise Exception("No device for path %s" % opt.path)
+
+    opt.con.commit()
 
     show_stats(opt)
 
@@ -377,8 +400,6 @@ def show_stats(opt):
     for k, v in opt.n.items():
         print("%s: %s" % ((' ' * width + k)[-width:], v))
 
-    opt.con.commit()
-
 
 def update_hashes(opt):
     """update_hashes - update hashes, oldest first
@@ -387,36 +408,67 @@ def update_hashes(opt):
         opt (argparse namespace): options
     """
 
-    def get_todo():
-        """Get unhashed files in blocks of 1000"""
-        return do_query(
+    count = do_one(
+        opt,
+        """
+select count(*) as count
+  from file join file_hash using (file) join uuid using (uuid)
+       left join hash using (hash)
+ where ?-date > ? or hash is null
+""",
+        [time.time(), 24 * 60 * 60 * opt.max_hash_age],
+    ).count
+
+    print("%s hashes to update" % count)
+
+    at_once = 3
+    # do this in blocks of `at_once` working backwards because
+    # relying on updating of hashes to remove them from the todo
+    # list (working blockwise *forward* through the list) won't
+    # work when files are deleted / on unmounted drives.
+    offset = count // at_once
+
+    while offset >= 0:
+        todo = do_query(
             opt,
             """
-select *
-  from file join uuid using (uuid)
- where ?-hash_date > ? or hash is null
- order by hash is null desc, hash_date
- limit 1000
+select * from file join file_hash using (file) join uuid using (uuid)
+       left join hash using (hash)
+ where ?-date > ? or hash is null
+ order by hash is null desc, date
+ limit ? offset ?
 """,
-            [time.time(), 24 * 60 * 60 * opt.max_hash_age],
+            [
+                time.time(),
+                24 * 60 * 60 * opt.max_hash_age,
+                at_once,
+                offset * at_once,
+            ],
         )
-
-    todo = get_todo()
-
-    while todo:
-        rec = todo.pop(0)
-        try:
-            rec.hash = hash_path(
-                os.path.join(opt.mntpnts[rec.uuid_text], rec.path)
-            )
-            del rec['uuid_text']
-            save_rec(opt, rec)
-        except FileNotFoundError:
-            pass
-        if not todo:
-            opt.con.commit()
-            todo = get_todo()
-    opt.con.commit()
+        offset -= 1
+        for rec in todo:
+            try:
+                hash_text = hash_path(
+                    os.path.join(
+                        opt.mntpnts[rec.uuid_text].mountpoint, rec.path
+                    )
+                )
+                hash_pk, new = get_or_make_pk(
+                    opt, 'hash', {'hash_text': hash_text}
+                )
+                file_hash, new = get_or_make_rec(
+                    opt, 'file_hash', {'file_hash': rec.file_hash}
+                )
+                assert not new
+                file_hash.hash = hash_pk
+                file_hash.date = opt.run_time
+                save_rec(opt, file_hash)
+            except FileNotFoundError:
+                print(rec.path, 'not found')
+                opt.n['offline/deleted'] += 1
+                pass
+        print(len(todo))
+        opt.con.commit()
 
 
 if __name__ == '__main__':
