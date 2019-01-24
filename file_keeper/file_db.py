@@ -169,7 +169,11 @@ def can_path(path):
 
 
 def do_query(opt, q, vals=None):
-    opt.cur.execute(q, vals or [])
+    try:
+        opt.cur.execute(q, vals or [])
+    except Exception:
+        print(q)
+        raise
     res = opt.cur.fetchall()
     # this can consume a lot of RAM, but avoids blocking DB calls
     # i.e. making other queries while still consuming this result
@@ -321,7 +325,6 @@ def proc_dev(opt, dev):
         for filename in files:
             proc_file(opt, dev, os.path.join(path, filename))
             c += 1
-    print(c)
 
 
 def main():
@@ -387,6 +390,7 @@ def save_rec(opt, rec):
         table=table, pk=pk, values=','.join('%s=?' % i[0] for i in vals)
     )
     try:
+        # if not opt.dry_run:
         opt.cur.execute(q, [i[1] for i in vals])
     except Exception:
         print(q)
@@ -412,15 +416,14 @@ def update_hashes(opt):
     """
 
     def get_todo():
+        """Get unhashed files in blocks of 1000"""
         return do_query(
             opt,
             """
 select *
-  from (select * from file join file_hash using (file)
-       join uuid using (uuid)) as x
-       left join hash using (hash)
- where ?-date > ? or hash is null
- order by hash is null desc, date
+  from file join uuid using (uuid)
+ where ?-hash_date > ? or hash is null
+ order by hash is null desc, hash_date
  limit 1000
 """,
             [time.time(), 24 * 60 * 60 * opt.max_hash_age],
@@ -428,24 +431,14 @@ select *
 
     todo = get_todo()
 
-    print(todo)
     while todo:
         rec = todo.pop(0)
-        print(rec.path)
         try:
-            hash_text = hash_path(
+            rec.hash = hash_path(
                 os.path.join(opt.mntpnts[rec.uuid_text], rec.path)
             )
-            hash_pk, new = get_or_make_pk(
-                opt, 'hash', {'hash_text': hash_text}
-            )
-            file_hash, new = get_or_make_rec(
-                opt, 'file_hash', {'file_hash': rec.file_hash}
-            )
-            assert not new
-            file_hash.hash = hash_pk
-            file_hash.date = opt.run_time
-            save_rec(opt, file_hash)
+            del rec['uuid_text']
+            save_rec(opt, rec)
         except FileNotFoundError:
             pass
         if not todo:
