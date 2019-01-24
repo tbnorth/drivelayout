@@ -149,6 +149,7 @@ def do_query(opt, q, vals=None):
 
 
 def do_one(opt, q, vals=None):
+    """Run a query expected to create a single record response"""
     ans = do_query(opt, q, vals=vals)
     if len(ans) != 1:
         raise Exception("'%s' did not produce a single record response" % q)
@@ -412,9 +413,8 @@ def update_hashes(opt):
         opt,
         """
 select count(*) as count
-  from file join file_hash using (file) join uuid using (uuid)
-       left join hash using (hash)
- where ?-date > ? or hash is null
+  from file join uuid using (uuid)
+ where ?-hash_date > ? or hash is null
 """,
         [time.time(), 24 * 60 * 60 * opt.max_hash_age],
     ).count
@@ -432,10 +432,9 @@ select count(*) as count
         todo = do_query(
             opt,
             """
-select * from file join file_hash using (file) join uuid using (uuid)
-       left join hash using (hash)
- where ?-date > ? or hash is null
- order by hash is null desc, date
+select * from file join uuid using (uuid)
+ where ?-hash_date > ? or hash is null
+ order by hash is null desc, hash_date
  limit ? offset ?
 """,
             [
@@ -453,16 +452,9 @@ select * from file join file_hash using (file) join uuid using (uuid)
                         opt.mntpnts[rec.uuid_text].mountpoint, rec.path
                     )
                 )
-                hash_pk, new = get_or_make_pk(
-                    opt, 'hash', {'hash_text': hash_text}
-                )
-                file_hash, new = get_or_make_rec(
-                    opt, 'file_hash', {'file_hash': rec.file_hash}
-                )
-                assert not new
-                file_hash.hash = hash_pk
-                file_hash.date = opt.run_time
-                save_rec(opt, file_hash)
+                rec.hash = hash_text
+                del rec['uuid_text']
+                save_rec(opt, rec)
             except FileNotFoundError:
                 print(rec.path, 'not found')
                 opt.n['offline/deleted'] += 1
