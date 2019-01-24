@@ -362,7 +362,7 @@ def get_or_make_db(opt):
             "--dry-run: can't create database, no file '%s'" % opt.db_file
         )
     if opt.dry_run:
-        con = sqlite3.connect("file:%s?mode=ro" % opt.db_file)
+        con = sqlite3.connect("file:%s?mode=ro" % opt.db_file, uri=True)
     else:
         con = sqlite3.connect(opt.db_file)
     if not exists:
