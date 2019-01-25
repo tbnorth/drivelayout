@@ -113,8 +113,18 @@ def list_files(opt):
         print(path)
 
 
-def dupe_check(todo):
-    return
+def dupe_check(opt, todo):
+    lists = defaultdict(list)
+    for rec in todo:
+        if rec.hash:
+            lists[rec.hash].append(rec)
+        else:
+            lists['NOHASH'].append(rec)
+    for hash_text, list_ in lists.items():
+        if len(list_) > 1:
+            print("%s %s" % (hash_text, list_[0].st_size))
+            for path in list_:
+                print("  %s" % path.path)
 
 
 def list_dupes(opt):
@@ -124,7 +134,7 @@ def list_dupes(opt):
     for path in do_query(opt, "select * from file order by st_size desc"):
         if size != path.st_size:
             if todo:
-                dupe_check(todo)
+                dupe_check(opt, todo)
             size = path.st_size
             todo = [path]
         else:
@@ -313,7 +323,11 @@ def proc_dev(opt, uuid):
     print("{name} ({label}, {uuid}) on {mountpoint}".format(**dev))
     opt.base = os.path.relpath(opt.path, start=dev.mountpoint)
     opt.mntpnt = dev.mountpoint
-    assert os.path.join(dev.mountpoint, opt.base) == opt.path
+    assert os.path.join(dev.mountpoint, opt.base).rstrip('./') == opt.path, (
+        os.path.join(dev.mountpoint, opt.base),
+        opt.path,
+        opt.mntpnt,
+    )
 
     print(opt.base)
     opt.uuid, new = get_or_make_pk(opt, 'uuid', {'uuid_text': dev.uuid})
@@ -419,22 +433,27 @@ def update_hashes(opt):
     count = do_one(
         opt,
         """
-select count(*) as count
+select count(*) as count, sum(st_size) as total
   from file join uuid using (uuid)
  where ?-hash_date > ? or hash is null
 """,
         [time.time(), 24 * 60 * 60 * opt.max_hash_age],
-    ).count
+    )
+    count, total = count.count, count.total
 
     print("%s hashes to update" % count)
 
-    at_once = 3
+    at_once = 300
     # do this in blocks of `at_once` working backwards because
     # relying on updating of hashes to remove them from the todo
     # list (working blockwise *forward* through the list) won't
     # work when files are deleted / on unmounted drives.
     offset = count // at_once
 
+    done = 0
+    read = 0
+    safe = 0
+    start = prog = time.time()
     while offset >= 0:
         todo = do_query(
             opt,
@@ -462,11 +481,32 @@ select * from file join uuid using (uuid)
                 rec.hash = hash_text
                 del rec['uuid_text']
                 save_rec(opt, rec)
+                done += 1
+                read += rec.st_size
+                safe += rec.st_size
+                if safe > 1000000000:  # commit every GB read
+                    opt.con.commit()
+                    safe = 0
+                now = time.time()
+                if now - prog > 5:
+                    print(
+                        "{}/{} ({:,}/{:,}, {:.2f}%, "
+                        "{:.1f}/{:.1f} min., {:,}/s)".format(
+                            done,
+                            count,
+                            read,
+                            total,
+                            read / total * 100,
+                            (now - start) / 60,
+                            (now - start) / 60 * (total / read),
+                            int(read / (now - start)),
+                        )
+                    )
+                    prog = now
             except FileNotFoundError:
                 print(rec.path, 'not found')
                 opt.n['offline/deleted'] += 1
                 pass
-        print(len(todo))
         opt.con.commit()
 
 
