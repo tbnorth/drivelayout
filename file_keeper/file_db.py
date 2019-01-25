@@ -17,6 +17,8 @@ from subprocess import Popen, PIPE
 
 from addict import Dict
 
+from humanread import hr
+
 
 class FileKeeperError(Exception):
     pass
@@ -25,7 +27,7 @@ class FileKeeperError(Exception):
 # field names matching os.stat() attributes
 STATFLDS = 'st_size', 'st_mtime', 'st_ino'
 
-BLKSIZE = 10000000  # amount to read when hashing files
+BLKSIZE = 100000000  # amount to read when hashing files
 
 if sys.version_info < (3, 6):
     # need dict insertion order
@@ -252,7 +254,7 @@ def get_recs(opt, table, ident):
     return get_rec(opt, table, ident, multi=True)
 
 
-def hash_path(path):
+def hash_path(path, callback=None):
     """hash_path - hash a file path
 
     Args:
@@ -261,12 +263,16 @@ def hash_path(path):
         str: hex hash for file
     """
     ans = sha1()
+    count = 0
     with open(path, 'rb') as data:
         while True:
             block = data.read(BLKSIZE)
             ans.update(block)
             if len(block) != BLKSIZE:
                 break
+            count += 1
+            if callback:
+                callback(count * BLKSIZE)
 
     return ans.hexdigest()
 
@@ -473,11 +479,24 @@ select * from file join uuid using (uuid)
         offset -= 1
         for rec in todo:
             try:
+                if rec.st_size > 1000000000:
+
+                    def cb(done, total=rec.st_size):
+                        print(
+                            "(%s file, %.1f%%)\r"
+                            % (hr(rec.st_size), done / total * 100), end=''
+                        )
+                    cb(0)
+                else:
+                    cb = None
+
                 hash_text = hash_path(
                     os.path.join(
                         opt.mntpnts[rec.uuid_text].mountpoint, rec.path
-                    )
+                    ), callback=cb
                 )
+                if cb:
+                    print()
                 rec.hash = hash_text
                 del rec['uuid_text']
                 save_rec(opt, rec)
@@ -490,16 +509,16 @@ select * from file join uuid using (uuid)
                 now = time.time()
                 if now - prog > 5:
                     print(
-                        "{}/{} ({:,}/{:,}, {:.2f}%, "
-                        "{:.1f}/{:.1f} min., {:,}/s)".format(
+                        "{}/{} ({}/{}, {:.2f}%, "
+                        "{:.1f}/{:.1f} min., {}/s)".format(
                             done,
                             count,
-                            read,
-                            total,
+                            hr(read),
+                            hr(total),
                             read / total * 100,
                             (now - start) / 60,
                             (now - start) / 60 * (total / read),
-                            int(read / (now - start)),
+                            hr(int(read / (now - start))),
                         )
                     )
                     prog = now
