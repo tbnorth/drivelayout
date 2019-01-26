@@ -17,7 +17,7 @@ def hr(x, base=1024.0):
         if ans < base:
             break
         ans = ans / base
-    ans = ('%.2f' % ans).rstrip('.0')
+    ans = ('%.2f' % ans).rstrip('.0') if ans else '0'
     if i > 0 and s == 'bytes':  # ran out of prefixes
         ans = str(x)
     return '%s %s' % (ans, s)

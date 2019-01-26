@@ -124,7 +124,7 @@ def dupe_check(opt, todo):
             lists['NOHASH'].append(rec)
     for hash_text, list_ in lists.items():
         if len(list_) > 1:
-            print("%s %s" % (hash_text, list_[0].st_size))
+            print("\n%s %s" % (hash_text, hr(list_[0].st_size)))
             for path in list_:
                 print("  %s" % path.path)
 
@@ -432,6 +432,8 @@ def show_stats(opt):
 def update_hashes(opt):
     """update_hashes - update hashes, oldest first
 
+    Only hash files where more than one of st_size exists.
+
     Args:
         opt (argparse namespace): options
     """
@@ -441,7 +443,10 @@ def update_hashes(opt):
         """
 select count(*) as count, sum(st_size) as total
   from file join uuid using (uuid)
- where ?-hash_date > ? or hash is null
+       join (select st_size as class,
+                    count(*) as ccount from file group by st_size) as x
+            on (st_size = class)
+ where x.ccount > 1 and (?-hash_date > ? or hash is null)
 """,
         [time.time(), 24 * 60 * 60 * opt.max_hash_age],
     )
@@ -456,10 +461,11 @@ select count(*) as count, sum(st_size) as total
     # work when files are deleted / on unmounted drives.
     offset = count // at_once
 
-    done = 0
-    read = 0
-    safe = 0
-    start = prog = time.time()
+    done = 0  # count of files done
+    read = 0  # total bytes read
+    safe = 0  # bytes read since last commit
+    start = time.time()
+    prog = 0  # time of last progress message
     while offset >= 0:
         todo = do_query(
             opt,
@@ -478,6 +484,22 @@ select * from file join uuid using (uuid)
         )
         offset -= 1
         for rec in todo:
+            now = time.time()
+            if now - prog > 5:  # every 5 seconds
+                print(
+                    "{}/{} ({}/{}, {:.2f}%, "
+                    "{:.1f}/{:.1f} min., {}/s)".format(
+                        done,
+                        count,
+                        hr(read),
+                        hr(total),
+                        read / total * 100,
+                        (now - start) / 60,
+                        (now - start) / 60 * (total / read) if read else -1,
+                        hr(int(read / (now - start))),
+                    )
+                )
+                prog = now
             try:
                 if rec.st_size > 1000000000:
 
@@ -496,6 +518,7 @@ select * from file join uuid using (uuid)
                     ), callback=cb
                 )
                 if cb:
+                    cb(rec.st_size)  # show 100%
                     print()
                 rec.hash = hash_text
                 del rec['uuid_text']
@@ -506,22 +529,6 @@ select * from file join uuid using (uuid)
                 if safe > 1000000000:  # commit every GB read
                     opt.con.commit()
                     safe = 0
-                now = time.time()
-                if now - prog > 5:
-                    print(
-                        "{}/{} ({}/{}, {:.2f}%, "
-                        "{:.1f}/{:.1f} min., {}/s)".format(
-                            done,
-                            count,
-                            hr(read),
-                            hr(total),
-                            read / total * 100,
-                            (now - start) / 60,
-                            (now - start) / 60 * (total / read),
-                            hr(int(read / (now - start))),
-                        )
-                    )
-                    prog = now
             except FileNotFoundError:
                 print(rec.path, 'not found')
                 opt.n['offline/deleted'] += 1
