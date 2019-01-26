@@ -84,6 +84,11 @@ def make_parser():
     )
 
     parser.add_argument(
+        "--dupes-only",
+        action='store_true',
+        help="Update hashes for possible dupes only",
+    )
+    parser.add_argument(
         "--dry-run", action='store_true', help="Make new changes to DB"
     )
 
@@ -285,7 +290,12 @@ def hash_path(path, callback=None):
 
 
 def proc_file(opt, dev, filepath):
-    if not os.path.isfile(filepath):
+    if os.path.islink(filepath):
+        opt.n['sym. links (ignored)'] += 1
+        return
+    if not os.path.exists(filepath):
+        print(filepath, 'not found')
+        opt.n['offline/deleted'] += 1
         return
     stat = os.stat(filepath)
     opt.n['stated'] += 1
@@ -314,8 +324,7 @@ def proc_file(opt, dev, filepath):
             if opt.accept_current:
                 for k in STATFLDS:
                     setattr(file_rec, k, getattr(stat, k))
-
-            save_rec(opt, file_rec)
+                save_rec(opt, file_rec)
         else:
             opt.n['unchanged_stat'] += 1
     else:
@@ -439,24 +448,25 @@ def show_stats(opt):
 def update_hashes(opt):
     """update_hashes - update hashes, oldest first
 
-    Only hash files where more than one of st_size exists.
+    Maybe hash files where more than one of st_size exists.
 
     Args:
         opt (argparse namespace): options
     """
-
-    count = do_one(
-        opt,
-        """
+    q = """
 select count(*) as count, sum(st_size) as total
   from file join uuid using (uuid)
+"""
+    if opt.dupes_only:
+        q += """
        join (select st_size as class,
                     count(*) as ccount from file group by st_size) as x
-            on (st_size = class)
- where x.ccount > 1 and (?-hash_date > ? or hash is null)
-""",
-        [time.time(), 24 * 60 * 60 * opt.max_hash_age],
-    )
+            on (st_size = class)"""
+    q += "\nwhere (?-hash_date > ? or hash is null)"
+    if opt.dupes_only:
+        q += " and x.ccount > 1"
+
+    count = do_one(opt, q, [time.time(), 24 * 60 * 60 * opt.max_hash_age])
     count, total = count.count, count.total
 
     print("%s hashes to update" % count)
@@ -513,8 +523,10 @@ select * from file join uuid using (uuid)
                     def cb(done, total=rec.st_size):
                         print(
                             "(%s file, %.1f%%)\r"
-                            % (hr(rec.st_size), done / total * 100), end=''
+                            % (hr(rec.st_size), done / total * 100),
+                            end='',
                         )
+
                     cb(0)
                 else:
                     cb = None
@@ -522,7 +534,8 @@ select * from file join uuid using (uuid)
                 hash_text = hash_path(
                     os.path.join(
                         opt.mntpnts[rec.uuid_text].mountpoint, rec.path
-                    ), callback=cb
+                    ),
+                    callback=cb,
                 )
                 if cb:
                     cb(rec.st_size)  # show 100%
