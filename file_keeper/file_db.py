@@ -125,8 +125,15 @@ def dupe_check(opt, todo):
     for hash_text, list_ in lists.items():
         if len(list_) > 1:
             print("\n%s %s" % (hash_text, hr(list_[0].st_size)))
-            for path in list_:
-                print("  %s" % path.path)
+            inos = defaultdict(list)
+            for rec in list_:
+                inos[(rec.uuid, rec.st_ino)].append(rec)
+            for ino in inos.values():
+                link = len(ino) > 1
+                if link:
+                    print("  %s" % ((ino[0].uuid, ino[0].st_ino),))
+                for rec in ino:
+                    print("  %s%s" % ('  ' if link else '', rec.path))
 
 
 def list_dupes(opt):
