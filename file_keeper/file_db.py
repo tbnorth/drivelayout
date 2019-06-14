@@ -538,6 +538,8 @@ create temp view if not exists up_hash as select *
                     print()
                 rec.hash = hash_text
                 del rec['uuid_text']
+                del rec['class']
+                del rec['ccount']
                 save_rec(opt, rec)
                 done += 1
                 read += rec.st_size
