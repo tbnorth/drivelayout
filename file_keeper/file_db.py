@@ -187,7 +187,7 @@ def do_query(opt, q, vals=None):
 def do_one(opt, q, vals=None):
     """Run a query expected to create a single record response"""
     ans = do_query(opt, q, vals=vals)
-    if len(ans) != 1:
+    if ans is None or len(ans) != 1:
         raise Exception("'%s' did not produce a single record response" % q)
     return ans[0]
 
@@ -454,7 +454,7 @@ def update_hashes(opt):
         opt (argparse namespace): options
     """
     q = """
-select count(*) as count, sum(st_size) as total
+create temp view if not exists up_hash as select *
   from file join uuid using (uuid)
 """
     if opt.dupes_only:
@@ -462,11 +462,16 @@ select count(*) as count, sum(st_size) as total
        join (select st_size as class,
                     count(*) as ccount from file group by st_size) as x
             on (st_size = class)"""
-    q += "\nwhere (?-hash_date > ? or hash is null)"
+    q += "\nwhere (%s-hash_date > %s or hash is null)" % (
+        # float()/int() here are redundant, but eliminate SQL injection
+        float(time.time()), 24 * 60 * 60 * int(opt.max_hash_age))
     if opt.dupes_only:
         q += " and x.ccount > 1"
 
-    count = do_one(opt, q, [time.time(), 24 * 60 * 60 * opt.max_hash_age])
+    do_query(opt, q)
+
+    q_summary = "select count(*) as count, sum(st_size) as total from up_hash"
+    count = do_one(opt, q_summary)
     count, total = count.count, count.total
 
     print("%s hashes to update" % count)
@@ -484,17 +489,8 @@ select count(*) as count, sum(st_size) as total
     start = time.time()
     prog = 0  # time of last progress message
     while offset >= 0:
-        todo = do_query(
-            opt,
-            """
-select * from file join uuid using (uuid)
- where ?-hash_date > ? or hash is null
- order by hash is null desc, hash_date
- limit ? offset ?
-""",
+        todo = do_query(opt, "select * from up_hash limit ? offset ?",
             [
-                time.time(),
-                24 * 60 * 60 * opt.max_hash_age,
                 at_once,
                 offset * at_once,
             ],

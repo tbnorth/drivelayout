@@ -17,6 +17,8 @@ run_all () {
     run --path . --dry-run
     log "regular run test"
     run --path .
+    log "--accept-current test"
+    run --path . --accept-current
     log "list files"
     run --list-files
     log "list dupes"
