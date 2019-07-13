@@ -8,12 +8,12 @@ create table hash (    -- hashes
 create index idx_hash_text on hash (hash_text); -- , length);
 create table uuid (    -- uuids
     uuid INTEGER PRIMARY KEY,
-    uuid_text text     -- text of uuid
-    label text         -- partition's label
-    -- following help to describe drive to user
-    part_size text     -- partition size, text from lsblk
-    drive_size text    -- drive size, text from lsblk
-    model text         -- drive model
+    uuid_text text,    -- text of uuid
+    -- following from lsblk etc. help to describe drive to user
+    part_size text,    -- partition size, text
+    drive_size text,   -- drive size, text
+    label text,        -- label
+    model text,        -- drive model
     serial text        -- drive serial
 );
 create index idx_uuid_text on uuid (uuid_text);

@@ -82,14 +82,13 @@ def make_parser():
         help="Re-hash files with hashes older than DAYS",
         metavar='DAYS',
     )
-
     parser.add_argument(
         "--dupes-only",
         action='store_true',
         help="Update hashes for possible dupes only",
     )
     parser.add_argument(
-        "--dry-run", action='store_true', help="Make new changes to DB"
+        "--dry-run", action='store_true', help="Make no changes to DB"
     )
 
     # actions
@@ -105,6 +104,9 @@ def make_parser():
         "--accept-current",
         action='store_true',
         help="Accept current files as correct",
+    )
+    parser.add_argument(
+        "--list-drives", action='store_true', help="Show list of known drives"
     )
 
     return parser
@@ -153,6 +155,10 @@ def list_dupes(opt):
             todo = [path]
         else:
             todo.append(path)
+
+
+def list_drivers(opt):
+    pass
 
 
 def can_path(path):
@@ -352,7 +358,12 @@ def proc_dev(opt, uuid):
     )
 
     print(opt.base)
-    opt.uuid, new = get_or_make_pk(opt, 'uuid', {'uuid_text': dev.uuid})
+    opt.uuid, new = get_or_make_pk(
+        opt,
+        'uuid',
+        {'uuid_text': dev.uuid, 'model': dev.model, 'serial': dev.serial},
+    )
+    print(dev)
     assert opt.uuid, opt.uuid
     c = 0
     for path, dirs, files in os.walk(opt.path):
@@ -377,16 +388,22 @@ def main():
     opt.dev = get_devs()
     opt.mntpnts = {}
 
-    def mntpnts(nodes, d):
+    def mntpnts(nodes, d, parent=None):
         for node in nodes:
+            inf = Dict()
+            inf.update(node)
+            if parent is not None:
+                for k, v in inf.items():
+                    if v is None and k in inf:
+                        inf[k] = parent.get(k)
             if node.get('uuid'):
-                d[node['uuid']] = Dict()
-                d[node['uuid']].update(node)
-            mntpnts(node.get('children', []), d)
+                d[node['uuid']] = inf
+
+            mntpnts(node.get('children', []), d, parent=inf)
 
     mntpnts(opt.dev["blockdevices"], opt.mntpnts)
 
-    for action in ['list_dupes', 'list_files', 'update_hashes']:
+    for action in ['list_dupes', 'list_files', 'update_hashes', 'list_drives']:
         if getattr(opt, action):
             globals()[action](opt)
             return
@@ -416,7 +433,10 @@ def get_or_make_db(opt):
         con = sqlite3.connect(opt.db_file)
     if not exists:
         for cmd in open('file_db.sql').read().split(';\n'):
-            con.execute(cmd)  # can't use do_query here, that's OK
+            con.execute(cmd)
+            # can't use do_query here, it uses opt.cur
+            # which doesn't exist yet, that's OK
+    con.commit()
     cur = con.cursor()
     return con, cur
 
@@ -464,7 +484,9 @@ create temp view if not exists up_hash as select *
             on (st_size = class)"""
     q += "\nwhere (%s-hash_date > %s or hash is null)" % (
         # float()/int() here are redundant, but eliminate SQL injection
-        float(time.time()), 24 * 60 * 60 * int(opt.max_hash_age))
+        float(time.time()),
+        24 * 60 * 60 * int(opt.max_hash_age),
+    )
     if opt.dupes_only:
         q += " and x.ccount > 1"
 
@@ -489,11 +511,10 @@ create temp view if not exists up_hash as select *
     start = time.time()
     prog = 0  # time of last progress message
     while offset >= 0:
-        todo = do_query(opt, "select * from up_hash limit ? offset ?",
-            [
-                at_once,
-                offset * at_once,
-            ],
+        todo = do_query(
+            opt,
+            "select * from up_hash limit ? offset ?",
+            [at_once, offset * at_once],
         )
         offset -= 1
         for rec in todo:
