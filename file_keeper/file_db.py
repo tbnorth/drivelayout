@@ -358,12 +358,26 @@ def proc_dev(opt, uuid):
     )
 
     print(opt.base)
-    opt.uuid, new = get_or_make_pk(
-        opt,
-        'uuid',
-        {'uuid_text': dev.uuid, 'model': dev.model, 'serial': dev.serial},
+    rec, new = get_or_make_rec(opt, 'uuid', {'uuid_text': dev.uuid})
+    opt.uuid = rec.uuid
+    info = dict(
+        uuid=opt.uuid,
+        uuid_text=dev.uuid,
+        model=dev.model,
+        serial=dev.serial,
+        part_size=dev.size,
     )
-    print(dev)
+    if new:
+        save_rec(opt, info)
+    else:
+        changed = [k for k in info if rec[k] != info[k]]
+        if changed:
+            print("\nUUID %s DESCRIPTION CHANGED" % dev.uuid)
+            for k in changed:
+                print("%s → %s" % (rec[k], info[k]))
+            print()
+
+    print('\n'.join("%s: %s" % (k, v) for k, v in info.items()))
     assert opt.uuid, opt.uuid
     c = 0
     for path, dirs, files in os.walk(opt.path):
@@ -392,6 +406,7 @@ def main():
         for node in nodes:
             inf = Dict()
             inf.update(node)
+            # copy values like model etc. down from parent records
             if parent is not None:
                 for k, v in inf.items():
                     if v is None and k in inf:
