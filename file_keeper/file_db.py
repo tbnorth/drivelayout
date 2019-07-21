@@ -211,6 +211,9 @@ def get_devs():
 
 def get_pk(opt, table, ident, return_obj=False, multi=False):
 
+    if table in ident and ident[table] is None:
+        del ident[table]
+
     q = "select {table} from {table} where {vals}".format(
         table=table, vals=' and '.join('%s=?' % k for k in ident)
     )
@@ -389,6 +392,11 @@ def proc_dev(opt, uuid):
 def main():
 
     opt = get_options()
+    run_opt(opt)
+
+
+def run_opt(opt):
+
     if opt.path:
         canonical = can_path(opt.path)
         if opt.path != canonical:
@@ -572,11 +580,8 @@ create temp view if not exists up_hash as select *
                 if cb:
                     cb(rec.st_size)  # show 100%
                     print()
-                rec.hash = hash_text
-                del rec['uuid_text']
-                del rec['class']
-                del rec['ccount']
-                save_rec(opt, rec)
+                # FIXME: may be updating hash_text here, wrong?
+                save_rec(opt, {'file': rec.file, 'hash': hash_text})
                 done += 1
                 read += rec.st_size
                 safe += rec.st_size
