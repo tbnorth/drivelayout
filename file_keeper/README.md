@@ -25,7 +25,7 @@ Utilities for keeping an archive of unique files.
    - missing hashes
    - confirm old, update datestamp
  - find duplicate directories
-   - hash of hashes?
+   - hash of hashes? - too rigorous?
  - report deleted
    - confirm copies
  - forget deleted (copies, all)

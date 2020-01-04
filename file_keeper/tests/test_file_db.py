@@ -9,6 +9,7 @@ from addict import Dict
 
 FakeFS = namedtuple("FakeFS", "path db")
 
+# based on SEED from makefilehier.py
 GOLD = Dict(n=342, dupe_pairs=23)
 
 
