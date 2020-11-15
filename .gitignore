@@ -3,3 +3,8 @@ venv
 .cache
 *.pyc
 file_keeper.db
+*.db
+testfs
+*.sqlite3
+*.lst
+mntpnt.json

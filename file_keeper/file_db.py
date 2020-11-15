@@ -112,6 +112,16 @@ def make_parser():
     return parser
 
 
+def list_drives(opt):
+    """List drives in DB
+
+    Args:
+        opt (argparse Namespace): options
+    """
+    for path in do_query(opt, "select * from uuid"):
+        print(path)
+
+
 def list_files(opt):
     """List files in DB
 
