@@ -1,0 +1,60 @@
+name: File DB schema
+description: Histor / state of files
+tables:
+ - name: uuid
+   description: Drive UUID info.
+   fields:
+     - name: uuid
+       description: PK
+       type: ID
+       primary_key: true
+     - name: uuid_text
+       description: text of uuid
+       type: text
+     # following from lsblk etc. help to describe drive to user
+     - name: part_size
+       description: partition size, text
+       type: text
+     - name: drive_size
+       description: drive size, text
+       type: text
+     - name: label
+       description: label
+       type: text
+     - name: model
+       description: drive model
+       type: text
+     - name: serial
+       description: drive serial
+       type: text
+ - name: file
+   description: files
+   fields:
+     - name: file
+       description: PK
+       type: ID
+       primary_key: true
+     - name: uuid
+       description: uuid of drive (partition, but not partuuid)
+       type: ID
+       foreign_key:
+         table: uuid
+         field: uuid
+     - name: path
+       description: path to file
+       type: text
+     - name: st_ino
+       description: inode of file 
+       type: integer
+     - name: st_size
+       description: size of file
+       type: integer
+     - name: st_mtime
+       description: modification time of file
+       type: integer
+     - name: hash
+       description: file's hash
+       type: text
+     - name: hash_date
+       description: date on which the file had that hash
+       type: integer
